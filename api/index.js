@@ -71,23 +71,24 @@ app.get('/api/master-data', async (req, res) => {
   }
 });
 
-// -------------------------------------------------------------
-// ENDPOINT 3: MULAI PERJALANAN (AMT + FOTO WATERMARK & GPS)
-// -------------------------------------------------------------
+// ENDPOINT MULAI PERJALANAN (DENGAN BBM & KONSUMEN)
 app.post('/api/trips/start', upload.single('photo'), async (req, res) => {
-  const { vehicle_id, amt1_id, amt2_id, destination_name, start_gps, photo_base64 } = req.body;
+  const { vehicle_id, amt1_id, amt2_id, destination_name, customer_name, fuel_type, fuel_volume, start_gps, photo_base64 } = req.body;
 
   try {
     const query = `
-      INSERT INTO trips (vehicle_id, amt1_id, amt2_id, destination_name, start_time, start_gps, start_photo, status)
-      VALUES ($1, $2, $3, $4, NOW(), $5, $6, 'IN_PROGRESS')
+      INSERT INTO trips (vehicle_id, amt1_id, amt2_id, destination_name, customer_name, fuel_type, fuel_volume, start_time, start_gps, start_photo, status)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), $8, $9, 'IN_PROGRESS')
       RETURNING *;
     `;
     const values = [
       vehicle_id, 
       amt1_id, 
       amt2_id && amt2_id !== '' ? amt2_id : null, 
-      destination_name, 
+      destination_name,
+      customer_name || destination_name,
+      fuel_type || 'Biosolar',
+      fuel_volume || 0,
       start_gps,
       photo_base64 || null
     ];
@@ -102,26 +103,34 @@ app.post('/api/trips/start', upload.single('photo'), async (req, res) => {
   }
 });
 
-// -------------------------------------------------------------
-// ENDPOINT 4: SELESAI PERJALANAN (AMT + FOTO WATERMARK & GPS)
-// -------------------------------------------------------------
-app.post('/api/trips/end', upload.single('photo'), async (req, res) => {
-  const { trip_id, vehicle_id, end_gps, photo_base64 } = req.body;
-
+// ENDPOINT LAPORAN (DENGAN BBM & KONSUMEN)
+app.get('/api/reports', async (req, res) => {
   try {
     const query = `
-      UPDATE trips 
-      SET end_time = NOW(), end_gps = $1, end_photo = $2, status = 'COMPLETED'
-      WHERE trip_id = $3
-      RETURNING *;
+      SELECT 
+        t.trip_id,
+        v.plate_number, v.brand, v.capacity, v.compartment,
+        d1.name AS amt1_name,
+        d2.name AS amt2_name,
+        t.destination_name,
+        t.customer_name,
+        t.fuel_type,
+        t.fuel_volume,
+        t.start_time, t.end_time,
+        t.start_gps, t.end_gps,
+        t.start_photo, t.end_photo,
+        t.status
+      FROM trips t
+      JOIN vehicles v ON t.vehicle_id = v.vehicle_id
+      JOIN drivers d1 ON t.amt1_id = d1.driver_id
+      LEFT JOIN drivers d2 ON t.amt2_id = d2.driver_id
+      ORDER BY t.start_time DESC;
     `;
-    const result = await pool.query(query, [end_gps, photo_base64 || null, trip_id]);
-    await pool.query("UPDATE vehicles SET status = 'AVAILABLE' WHERE vehicle_id = $1", [vehicle_id]);
-
-    res.json({ message: 'Perjalanan selesai!', trip: result.rows[0] });
+    const result = await pool.query(query);
+    res.json(result.rows);
   } catch (err) {
     console.error(err);
-    res.status(500).json({ error: 'Gagal mengakhiri perjalanan' });
+    res.status(500).json({ error: 'Gagal mengambil data laporan' });
   }
 });
 
