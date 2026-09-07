@@ -332,5 +332,28 @@ app.put('/api/master/destinations/:id', async (req, res) => {
   }
 });
 
+// -------------------------------------------------------------
+// ENDPOINT HAPUS TRIP (KHUSUS ADMIN)
+// -------------------------------------------------------------
+app.delete('/api/trips/:id', async (req, res) => {
+  const { id } = req.params;
+  try {
+    // 1. Cek kendaraan yang terkait dengan trip ini
+    const tripQuery = await pool.query('SELECT vehicle_id, status FROM trips WHERE trip_id = $1', [id]);
+    if (tripQuery.rows.length > 0) {
+      const vehicleId = tripQuery.rows[0].vehicle_id;
+      // 2. Jika status trip masih IN_PROGRESS, kembalikan status mobil ke AVAILABLE
+      await pool.query("UPDATE vehicles SET status = 'AVAILABLE' WHERE vehicle_id = $1", [vehicleId]);
+    }
+
+    // 3. Hapus data trip
+    await pool.query('DELETE FROM trips WHERE trip_id = $1', [id]);
+    res.json({ message: 'Data perjalanan berhasil dihapus!' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Gagal menghapus data perjalanan' });
+  }
+});
+
 // Khusus Vercel Serverless Function: Ekspor app
 module.exports = app;
