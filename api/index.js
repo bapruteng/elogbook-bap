@@ -228,5 +228,53 @@ app.delete('/api/master/destinations/:id', async (req, res) => {
   }
 });
 
+// -------------------------------------------------------------
+// ENDPOINT EDIT MASTER DRIVER
+// -------------------------------------------------------------
+app.put('/api/master/drivers/:id', async (req, res) => {
+  const { name, username, password } = req.body;
+  try {
+    const result = await pool.query(
+      'UPDATE drivers SET name = $1, username = $2, password = $3 WHERE driver_id = $4 RETURNING *',
+      [name, username, password, req.params.id]
+    );
+    res.json(result.rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: 'Gagal merubah data driver' });
+  }
+});
+
+// -------------------------------------------------------------
+// ENDPOINT EDIT MASTER VEHICLE
+// -------------------------------------------------------------
+app.put('/api/master/vehicles/:id', async (req, res) => {
+  const { plate_number, brand, capacity, compartment } = req.body;
+  try {
+    const result = await pool.query(
+      'UPDATE vehicles SET plate_number = $1, brand = $2, capacity = $3, compartment = $4 WHERE vehicle_id = $5 RETURNING *',
+      [plate_number, brand, capacity, compartment, req.params.id]
+    );
+    res.json(result.rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: 'Gagal merubah data armada' });
+  }
+});
+
+// -------------------------------------------------------------
+// ENDPOINT EDIT MASTER DESTINATION
+// -------------------------------------------------------------
+app.put('/api/master/destinations/:id', async (req, res) => {
+  const { location_name } = req.body;
+  try {
+    const result = await pool.query(
+      'UPDATE destinations SET location_name = $1 WHERE destination_id = $2 RETURNING *',
+      [location_name, req.params.id]
+    );
+    res.json(result.rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: 'Gagal merubah data lokasi' });
+  }
+});
+
 // Khusus Vercel Serverless Function: Ekspor app
 module.exports = app;
