@@ -72,15 +72,15 @@ app.get('/api/master-data', async (req, res) => {
 });
 
 // -------------------------------------------------------------
-// ENDPOINT 3: MULAI PERJALANAN (AMT)
+// ENDPOINT 3: MULAI PERJALANAN (AMT + FOTO WATERMARK & GPS)
 // -------------------------------------------------------------
 app.post('/api/trips/start', upload.single('photo'), async (req, res) => {
-  const { vehicle_id, amt1_id, amt2_id, destination_name, start_gps } = req.body;
+  const { vehicle_id, amt1_id, amt2_id, destination_name, start_gps, photo_base64 } = req.body;
 
   try {
     const query = `
-      INSERT INTO trips (vehicle_id, amt1_id, amt2_id, destination_name, start_time, start_gps, status)
-      VALUES ($1, $2, $3, $4, NOW(), $5, 'IN_PROGRESS')
+      INSERT INTO trips (vehicle_id, amt1_id, amt2_id, destination_name, start_time, start_gps, start_photo, status)
+      VALUES ($1, $2, $3, $4, NOW(), $5, $6, 'IN_PROGRESS')
       RETURNING *;
     `;
     const values = [
@@ -88,7 +88,8 @@ app.post('/api/trips/start', upload.single('photo'), async (req, res) => {
       amt1_id, 
       amt2_id && amt2_id !== '' ? amt2_id : null, 
       destination_name, 
-      start_gps
+      start_gps,
+      photo_base64 || null
     ];
     
     const result = await pool.query(query, values);
@@ -102,19 +103,19 @@ app.post('/api/trips/start', upload.single('photo'), async (req, res) => {
 });
 
 // -------------------------------------------------------------
-// ENDPOINT 4: SELESAI PERJALANAN (AMT)
+// ENDPOINT 4: SELESAI PERJALANAN (AMT + FOTO WATERMARK & GPS)
 // -------------------------------------------------------------
 app.post('/api/trips/end', upload.single('photo'), async (req, res) => {
-  const { trip_id, vehicle_id, end_gps } = req.body;
+  const { trip_id, vehicle_id, end_gps, photo_base64 } = req.body;
 
   try {
     const query = `
       UPDATE trips 
-      SET end_time = NOW(), end_gps = $1, status = 'COMPLETED'
-      WHERE trip_id = $2
+      SET end_time = NOW(), end_gps = $1, end_photo = $2, status = 'COMPLETED'
+      WHERE trip_id = $3
       RETURNING *;
     `;
-    const result = await pool.query(query, [end_gps, trip_id]);
+    const result = await pool.query(query, [end_gps, photo_base64 || null, trip_id]);
     await pool.query("UPDATE vehicles SET status = 'AVAILABLE' WHERE vehicle_id = $1", [vehicle_id]);
 
     res.json({ message: 'Perjalanan selesai!', trip: result.rows[0] });
@@ -125,7 +126,7 @@ app.post('/api/trips/end', upload.single('photo'), async (req, res) => {
 });
 
 // -------------------------------------------------------------
-// ENDPOINT 5: LAPORAN (ADMIN)
+// ENDPOINT 5: LAPORAN (ADMIN + LINK MAPS & FOTO)
 // -------------------------------------------------------------
 app.get('/api/reports', async (req, res) => {
   try {
@@ -138,6 +139,7 @@ app.get('/api/reports', async (req, res) => {
         t.destination_name,
         t.start_time, t.end_time,
         t.start_gps, t.end_gps,
+        t.start_photo, t.end_photo,
         t.status
       FROM trips t
       JOIN vehicles v ON t.vehicle_id = v.vehicle_id
@@ -152,6 +154,7 @@ app.get('/api/reports', async (req, res) => {
     res.status(500).json({ error: 'Gagal mengambil data laporan' });
   }
 });
+
 
 // -------------------------------------------------------------
 // ENDPOINT 6: CRUD DRIVERS
