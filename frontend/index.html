@@ -2,11 +2,27 @@
 <html lang="id">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
     <title>E-Logbook PT Bintang Agung Prima</title>
+    
+    <!-- PWA Meta Tags -->
+    <link rel="manifest" href="/manifest.json" />
+    <meta name="theme-color" content="#0056b3" />
+    <link rel="apple-touch-icon" href="https://cdn-icons-png.flaticon.com/512/2972/2972185.png" />
   </head>
-  <body style="margin: 0; background-color: #f4f6f9;">
+  <body>
     <div id="root"></div>
     <script type="module" src="/src/main.jsx"></script>
+
+    <!-- Register Service Worker -->
+    <script>
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+          navigator.serviceWorker.register('/sw.js')
+            .then(reg => console.log('PWA Service Worker terdaftar!', reg.scope))
+            .catch(err => console.error('Gagal daftar PWA:', err));
+        });
+      }
+    </script>
   </body>
 </html>
