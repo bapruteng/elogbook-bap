@@ -15,6 +15,9 @@ export default function App() {
   const [master, setMaster] = useState({ vehicles: [], drivers: [], destinations: [] });
   const [reports, setReports] = useState([]);
   const [selectedPhoto, setSelectedPhoto] = useState(null);
+
+  // State Filter Admin
+  const [filters, setFilters] = useState({ start_date: '', end_date: '', vehicle_id: '' });
   
   // State Logbook AMT
   const [tripForm, setTripForm] = useState({
@@ -23,8 +26,10 @@ export default function App() {
     destination_name: '',
     customer_name: '',
     fuel_type: 'Biosolar',
-    fuel_volume: ''
+    fuel_volume: '',
+    notes: ''
   });
+  const [endNotes, setEndNotes] = useState('');
   const [watermarkedPhoto, setWatermarkedPhoto] = useState(null);
   const [activeTrip, setActiveTrip] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -50,9 +55,19 @@ export default function App() {
   };
 
   const fetchReports = () => {
-    axios.get(`${API_URL}/reports`)
+    axios.get(`${API_URL}/reports`, { params: filters })
       .then((res) => setReports(res.data))
       .catch((err) => console.error('Gagal mengambil data laporan:', err));
+  };
+
+  const handleFilterSubmit = (e) => {
+    e.preventDefault();
+    fetchReports();
+  };
+
+  const resetFilters = () => {
+    setFilters({ start_date: '', end_date: '', vehicle_id: '' });
+    axios.get(`${API_URL}/reports`).then((res) => setReports(res.data));
   };
 
   // EXPORT EXCEL
@@ -68,6 +83,7 @@ export default function App() {
       'Volume (KL)': r.fuel_volume || 0,
       'Waktu Berangkat': new Date(r.start_time).toLocaleString('id-ID'),
       'Waktu Tiba': r.end_time ? new Date(r.end_time).toLocaleString('id-ID') : '-',
+      'Catatan / Kendala': r.notes || '-',
       'Status': r.status
     }));
 
@@ -84,16 +100,16 @@ export default function App() {
     doc.setFontSize(10);
     doc.text(`Dicetak Tanggal: ${new Date().toLocaleString('id-ID')}`, 14, 22);
 
-    const tableColumn = ["ID", "No Polisi", "AMT 1", "AMT 2", "Tujuan / Konsumen", "BBM", "Vol (KL)", "Berangkat", "Status"];
+    const tableColumn = ["ID", "No Polisi", "AMT 1 / 2", "Tujuan / Konsumen", "BBM", "Vol (KL)", "Berangkat", "Catatan", "Status"];
     const tableRows = reports.map(r => [
       `#${r.trip_id}`,
       r.plate_number,
-      r.amt1_name,
-      r.amt2_name || '-',
+      `${r.amt1_name}\n${r.amt2_name ? `+ ${r.amt2_name}` : ''}`,
       `${r.destination_name}\n(${r.customer_name || '-'})`,
       r.fuel_type || '-',
       r.fuel_volume || 0,
       new Date(r.start_time).toLocaleString('id-ID'),
+      r.notes || '-',
       r.status
     ]);
 
@@ -101,7 +117,7 @@ export default function App() {
     doc.save(`Laporan_BAP_${new Date().toISOString().slice(0,10)}.pdf`);
   };
 
-  // WATERMARK FOTO
+  // WATERMARK FOTO AUTOMATIC
   const handlePhotoCapture = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -220,11 +236,13 @@ export default function App() {
         trip_id: activeTrip.trip_id,
         vehicle_id: activeTrip.vehicle_id,
         end_gps: gps,
-        photo_base64: watermarkedPhoto
+        photo_base64: watermarkedPhoto,
+        notes: endNotes
       });
       setActiveTrip(null);
       setWatermarkedPhoto(null);
-      setTripForm({ vehicle_id: '', amt2_id: '', destination_name: '', customer_name: '', fuel_type: 'Biosolar', fuel_volume: '' });
+      setEndNotes('');
+      setTripForm({ vehicle_id: '', amt2_id: '', destination_name: '', customer_name: '', fuel_type: 'Biosolar', fuel_volume: '', notes: '' });
       alert('🛑 Perjalanan Selesai! Logbook Tercatat.');
     } catch (err) {
       alert('Gagal mengakhiri perjalanan: ' + err.message);
@@ -323,7 +341,7 @@ export default function App() {
     }
   };
 
-  // HITUNG DASHBOARD STATISTIK
+  // DASHBOARD STATS
   const inProgressCount = reports.filter(r => r.status === 'IN_PROGRESS').length;
   const completedCount = reports.filter(r => r.status === 'COMPLETED').length;
   const totalVolumeKL = reports.reduce((acc, r) => acc + (parseFloat(r.fuel_volume) || 0), 0);
@@ -429,6 +447,9 @@ export default function App() {
                 </div>
               </div>
 
+              <label style={styles.label}>CATATAN / KENDALA AWAL (OPSIONAL):</label>
+              <input type="text" style={styles.input} value={tripForm.notes} onChange={(e) => setTripForm({ ...tripForm, notes: e.target.value })} placeholder="Contoh: Cuaca gerimis / Antrean depo" />
+
               <label style={styles.label}>📷 FOTO ABSENSI SEBELUM KELUAR DEPO:</label>
               <input type="file" accept="image/*" capture="environment" onChange={handlePhotoCapture} style={styles.fileInput} />
 
@@ -448,6 +469,9 @@ export default function App() {
               <h3 style={{ marginTop: 0, color: '#856404' }}>Status: SEDANG BERJALAN</h3>
               <p style={{ fontSize: '16px' }}>Tujuan: <strong>{activeTrip.destination_name}</strong></p>
               <p style={{ fontSize: '14px', color: '#555' }}>Muatan: <strong>{activeTrip.fuel_volume} KL ({activeTrip.fuel_type})</strong></p>
+
+              <label style={styles.label}>CATATAN KENDALA TIBA (OPSIONAL):</label>
+              <input type="text" style={styles.input} value={endNotes} onChange={(e) => setEndNotes(e.target.value)} placeholder="Contoh: Jalan licin / Pembongkaran lancar" />
 
               <label style={styles.label}>📷 FOTO ABSENSI SAAT TIBA DI TUJUAN:</label>
               <input type="file" accept="image/*" capture="environment" onChange={handlePhotoCapture} style={styles.fileInput} />
@@ -488,6 +512,31 @@ export default function App() {
                 </div>
               </div>
 
+              {/* PANEL FILTER REKAP */}
+              <div style={styles.filterBox}>
+                <form onSubmit={handleFilterSubmit} style={{ display: 'flex', gap: '10px', alignItems: 'flex-end', flexWrap: 'wrap' }}>
+                  <div>
+                    <label style={styles.filterLabel}>Dari Tanggal:</label>
+                    <input type="date" style={styles.inputInline} value={filters.start_date} onChange={(e) => setFilters({ ...filters, start_date: e.target.value })} />
+                  </div>
+                  <div>
+                    <label style={styles.filterLabel}>Sampai Tanggal:</label>
+                    <input type="date" style={styles.inputInline} value={filters.end_date} onChange={(e) => setFilters({ ...filters, end_date: e.target.value })} />
+                  </div>
+                  <div>
+                    <label style={styles.filterLabel}>Pilih Armada:</label>
+                    <select style={styles.inputInline} value={filters.vehicle_id} onChange={(e) => setFilters({ ...filters, vehicle_id: e.target.value })}>
+                      <option value="">-- Semua Mobil --</option>
+                      {master.vehicles.map((v) => (
+                        <option key={v.vehicle_id} value={v.vehicle_id}>{v.plate_number}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <button type="submit" style={styles.filterBtn}>🔍 Filter Data</button>
+                  <button type="button" onClick={resetFilters} style={styles.resetBtn}>🔄 Reset</button>
+                </form>
+              </div>
+
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '20px' }}>
                 <h3 style={{ margin: 0 }}>REKAP LOGBOOK PERJALANAN ARMADA</h3>
                 <div>
@@ -499,7 +548,7 @@ export default function App() {
               <table border="1" cellPadding="8" cellSpacing="0" style={styles.table}>
                 <thead>
                   <tr style={{ backgroundColor: '#0056b3', color: '#fff' }}>
-                    <th>ID</th><th>Plat Mobil</th><th>AMT Utama / Pendamping</th><th>Tujuan / Konsumen</th><th>Muatan BBM</th><th>Waktu Berangkat</th><th>Waktu Tiba</th><th>Foto Absen</th><th>Status</th>
+                    <th>ID</th><th>Plat Mobil</th><th>AMT Utama / Pendamping</th><th>Tujuan / Konsumen</th><th>Muatan BBM</th><th>Berangkat & Tiba</th><th>Catatan / Kendala</th><th>Foto Absen</th><th>Status</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -517,13 +566,12 @@ export default function App() {
                       </td>
                       <td><strong>{r.fuel_volume || 0} KL</strong><br/><small>{r.fuel_type}</small></td>
                       <td>
-                        {new Date(r.start_time).toLocaleString('id-ID')}<br/>
-                        {r.start_gps && <a href={`https://maps.google.com/?q=${r.start_gps}`} target="_blank" rel="noreferrer" style={styles.mapLink}>📍 Maps Berangkat</a>}
-                      </td>
-                      <td>
-                        {r.end_time ? new Date(r.end_time).toLocaleString('id-ID') : '-'}<br/>
+                        <small>🛫 {new Date(r.start_time).toLocaleString('id-ID')}</small><br/>
+                        {r.start_gps && <a href={`https://maps.google.com/?q=${r.start_gps}`} target="_blank" rel="noreferrer" style={styles.mapLink}>📍 Maps Berangkat</a>}<br/>
+                        <small>🛬 {r.end_time ? new Date(r.end_time).toLocaleString('id-ID') : '-'}</small><br/>
                         {r.end_gps && <a href={`https://maps.google.com/?q=${r.end_gps}`} target="_blank" rel="noreferrer" style={styles.mapLink}>📍 Maps Tiba</a>}
                       </td>
+                      <td><small>{r.notes || '-'}</small></td>
                       <td>
                         {r.start_photo && <button onClick={() => setSelectedPhoto(r.start_photo)} style={styles.photoBtn}>📷 Foto Berangkat</button>}
                         {r.end_photo && <button onClick={() => setSelectedPhoto(r.end_photo)} style={{ ...styles.photoBtn, backgroundColor: '#17a2b8' }}>📷 Foto Tiba</button>}
@@ -646,7 +694,7 @@ export default function App() {
         </div>
       )}
 
-      {/* MODAL POPUP PREVIEW FOTO WATERMARK */}
+      {/* MODAL POPUP PREVIEW FOTO */}
       {selectedPhoto && (
         <div style={styles.modalOverlay} onClick={() => setSelectedPhoto(null)}>
           <div style={styles.modalContent} onClick={(e) => e.stopPropagation()}>
@@ -694,5 +742,9 @@ const styles = {
   statsGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '15px', marginBottom: '10px' },
   statCard: { backgroundColor: '#f8f9fa', padding: '15px', borderRadius: '6px', boxShadow: '0 1px 4px rgba(0,0,0,0.05)' },
   excelBtn: { backgroundColor: '#1d6f42', color: '#fff', border: 'none', padding: '8px 12px', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', marginRight: '8px' },
-  pdfBtn: { backgroundColor: '#b30b00', color: '#fff', border: 'none', padding: '8px 12px', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }
+  pdfBtn: { backgroundColor: '#b30b00', color: '#fff', border: 'none', padding: '8px 12px', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' },
+  filterBox: { backgroundColor: '#e9ecef', padding: '12px', borderRadius: '6px', marginBottom: '10px' },
+  filterLabel: { display: 'block', fontSize: '12px', fontWeight: 'bold', marginBottom: '3px' },
+  filterBtn: { backgroundColor: '#0056b3', color: '#fff', border: 'none', padding: '8px 15px', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' },
+  resetBtn: { backgroundColor: '#6c757d', color: '#fff', border: 'none', padding: '8px 15px', borderRadius: '4px', cursor: 'pointer', marginLeft: '5px' }
 };
