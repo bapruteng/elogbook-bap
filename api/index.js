@@ -71,14 +71,14 @@ app.get('/api/master-data', async (req, res) => {
   }
 });
 
-// ENDPOINT MULAI PERJALANAN (DENGAN BBM & KONSUMEN)
+// ENDPOINT START TRIP (DENGAN CATATAN/KENDALA)
 app.post('/api/trips/start', upload.single('photo'), async (req, res) => {
-  const { vehicle_id, amt1_id, amt2_id, destination_name, customer_name, fuel_type, fuel_volume, start_gps, photo_base64 } = req.body;
+  const { vehicle_id, amt1_id, amt2_id, destination_name, customer_name, fuel_type, fuel_volume, notes, start_gps, photo_base64 } = req.body;
 
   try {
     const query = `
-      INSERT INTO trips (vehicle_id, amt1_id, amt2_id, destination_name, customer_name, fuel_type, fuel_volume, start_time, start_gps, start_photo, status)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), $8, $9, 'IN_PROGRESS')
+      INSERT INTO trips (vehicle_id, amt1_id, amt2_id, destination_name, customer_name, fuel_type, fuel_volume, notes, start_time, start_gps, start_photo, status)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), $9, $10, 'IN_PROGRESS')
       RETURNING *;
     `;
     const values = [
@@ -89,6 +89,7 @@ app.post('/api/trips/start', upload.single('photo'), async (req, res) => {
       customer_name || destination_name,
       fuel_type || 'Biosolar',
       fuel_volume || 0,
+      notes || null,
       start_gps,
       photo_base64 || null
     ];
@@ -103,8 +104,49 @@ app.post('/api/trips/start', upload.single('photo'), async (req, res) => {
   }
 });
 
-// ENDPOINT LAPORAN (DENGAN BBM & KONSUMEN)
+// ENDPOINT END TRIP (UPDATE CATATAN KEDATANGAN)
+app.post('/api/trips/end', upload.single('photo'), async (req, res) => {
+  const { trip_id, vehicle_id, end_gps, photo_base64, notes } = req.body;
+
+  try {
+    const query = `
+      UPDATE trips 
+      SET end_time = NOW(), end_gps = $1, end_photo = $2, notes = COALESCE(NULLIF($3, ''), notes), status = 'COMPLETED'
+      WHERE trip_id = $4
+      RETURNING *;
+    `;
+    const result = await pool.query(query, [end_gps, photo_base64 || null, notes || null, trip_id]);
+    await pool.query("UPDATE vehicles SET status = 'AVAILABLE' WHERE vehicle_id = $1", [vehicle_id]);
+
+    res.json({ message: 'Perjalanan selesai!', trip: result.rows[0] });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Gagal mengakhiri perjalanan' });
+  }
+});
+
+// ENDPOINT REPORTS DENGAN DYNAMIC FILTER (TANGGAL & ARMADA)
 app.get('/api/reports', async (req, res) => {
+  const { start_date, end_date, vehicle_id } = req.query;
+
+  let whereClauses = [];
+  let queryParams = [];
+
+  if (start_date) {
+    queryParams.push(start_date);
+    whereClauses.push(`t.start_time >= $${queryParams.length}`);
+  }
+  if (end_date) {
+    queryParams.push(`${end_date} 23:59:59`);
+    whereClauses.push(`t.start_time <= $${queryParams.length}`);
+  }
+  if (vehicle_id) {
+    queryParams.push(vehicle_id);
+    whereClauses.push(`t.vehicle_id = $${queryParams.length}`);
+  }
+
+  const whereSql = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
+
   try {
     const query = `
       SELECT 
@@ -116,6 +158,7 @@ app.get('/api/reports', async (req, res) => {
         t.customer_name,
         t.fuel_type,
         t.fuel_volume,
+        t.notes,
         t.start_time, t.end_time,
         t.start_gps, t.end_gps,
         t.start_photo, t.end_photo,
@@ -124,9 +167,10 @@ app.get('/api/reports', async (req, res) => {
       JOIN vehicles v ON t.vehicle_id = v.vehicle_id
       JOIN drivers d1 ON t.amt1_id = d1.driver_id
       LEFT JOIN drivers d2 ON t.amt2_id = d2.driver_id
+      ${whereSql}
       ORDER BY t.start_time DESC;
     `;
-    const result = await pool.query(query);
+    const result = await pool.query(query, queryParams);
     res.json(result.rows);
   } catch (err) {
     console.error(err);
