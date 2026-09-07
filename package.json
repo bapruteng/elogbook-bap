@@ -2,6 +2,9 @@
   "name": "elogbook-bap",
   "version": "1.0.0",
   "private": true,
+  "scripts": {
+    "build": "cd frontend && npm install && npm run build"
+  },
   "dependencies": {
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
