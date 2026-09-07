@@ -1,27 +1,32 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 
-const API_URL = '/api'; // Menggunakan path relatif untuk Vercel / Render
+const API_URL = '/api';
 
 export default function App() {
-  const [user, setUser] = useState(null); // Data user yang sedang login
+  const [user, setUser] = useState(null);
   const [loginForm, setLoginForm] = useState({ username: '', password: '', role: 'driver' });
-  const [activeTab, setActiveTab] = useState('trip'); // 'trip', 'master_drivers', 'master_vehicles', 'master_destinations', 'reports'
+  const [activeTab, setActiveTab] = useState('trip');
   
   // State Master Data & Reports
   const [master, setMaster] = useState({ vehicles: [], drivers: [], destinations: [] });
   const [reports, setReports] = useState([]);
   
-  // State Input Logbook AMT
+  // State Logbook AMT
   const [tripForm, setTripForm] = useState({ vehicle_id: '', amt2_id: '', destination_name: '' });
   const [photo, setPhoto] = useState(null);
   const [activeTrip, setActiveTrip] = useState(null);
   const [loading, setLoading] = useState(false);
 
-  // State Form Tambah Master Data (Admin)
+  // State Form Tambah/Edit Master Data
   const [newDriver, setNewDriver] = useState({ name: '', username: '', password: '' });
+  const [editingDriverId, setEditingDriverId] = useState(null);
+
   const [newVehicle, setNewVehicle] = useState({ plate_number: '', brand: '', capacity: '', compartment: '' });
+  const [editingVehicleId, setEditingVehicleId] = useState(null);
+
   const [newDestination, setNewDestination] = useState({ location_name: '' });
+  const [editingDestinationId, setEditingDestinationId] = useState(null);
 
   useEffect(() => {
     fetchMasterData();
@@ -39,9 +44,7 @@ export default function App() {
       .catch((err) => console.error('Gagal mengambil data laporan:', err));
   };
 
-  // -------------------------------------------------------------
-  // FUNGSI LOGIN & LOGOUT
-  // -------------------------------------------------------------
+  // LOGIN & LOGOUT
   const handleLogin = async (e) => {
     e.preventDefault();
     try {
@@ -56,14 +59,8 @@ export default function App() {
         }
       }
     } catch (err) {
-      // Mengambil teks pesan error dengan aman
-      const errorMsg = 
-        err.response?.data?.error || 
-        err.response?.statusText || 
-        err.message || 
-        'Koneksi ke server gagal!';
-      
-      alert(`Gagal Login: ${errorMsg}`);
+      const msg = err.response?.data?.error || err.message || 'Login gagal!';
+      alert(msg);
     }
   };
 
@@ -73,13 +70,11 @@ export default function App() {
     setActiveTrip(null);
   };
 
-  // -------------------------------------------------------------
-  // FUNGSI LOGBOOK AMT
-  // -------------------------------------------------------------
+  // LOGBOOK AMT
   const getGPS = () => {
     return new Promise((resolve) => {
       if (!navigator.geolocation) {
-        resolve('-8.635,120.471'); // Default Reo
+        resolve('-8.635,120.471');
         return;
       }
       navigator.geolocation.getCurrentPosition(
@@ -100,7 +95,7 @@ export default function App() {
 
     const formData = new FormData();
     formData.append('vehicle_id', tripForm.vehicle_id);
-    formData.append('amt1_id', user.user.driver_id); // Otomatis dari akun AMT login
+    formData.append('amt1_id', user.user.driver_id);
     formData.append('amt2_id', tripForm.amt2_id);
     formData.append('destination_name', tripForm.destination_name);
     formData.append('start_gps', gps);
@@ -141,17 +136,26 @@ export default function App() {
     }
   };
 
-  // -------------------------------------------------------------
-  // FUNGSI CRUD MASTER DATA (ADMIN)
-  // -------------------------------------------------------------
-  const handleAddDriver = async (e) => {
+  // CRUD MASTER DRIVERS
+  const handleSaveDriver = async (e) => {
     e.preventDefault();
     try {
-      await axios.post(`${API_URL}/master/drivers`, newDriver);
-      alert('Driver AMT berhasil ditambahkan!');
+      if (editingDriverId) {
+        await axios.put(`${API_URL}/master/drivers/${editingDriverId}`, newDriver);
+        alert('Data Driver AMT berhasil diperbarui!');
+      } else {
+        await axios.post(`${API_URL}/master/drivers`, newDriver);
+        alert('Driver AMT berhasil ditambahkan!');
+      }
       setNewDriver({ name: '', username: '', password: '' });
+      setEditingDriverId(null);
       fetchMasterData();
-    } catch (err) { alert('Gagal menambah driver'); }
+    } catch (err) { alert('Gagal menyimpan data driver'); }
+  };
+
+  const startEditDriver = (driver) => {
+    setEditingDriverId(driver.driver_id);
+    setNewDriver({ name: driver.name, username: driver.username || '', password: driver.password || '123456' });
   };
 
   const handleDeleteDriver = async (id) => {
@@ -161,14 +165,31 @@ export default function App() {
     }
   };
 
-  const handleAddVehicle = async (e) => {
+  // CRUD MASTER VEHICLES
+  const handleSaveVehicle = async (e) => {
     e.preventDefault();
     try {
-      await axios.post(`${API_URL}/master/vehicles`, newVehicle);
-      alert('Armada berhasil ditambahkan!');
+      if (editingVehicleId) {
+        await axios.put(`${API_URL}/master/vehicles/${editingVehicleId}`, newVehicle);
+        alert('Data Armada berhasil diperbarui!');
+      } else {
+        await axios.post(`${API_URL}/master/vehicles`, newVehicle);
+        alert('Armada berhasil ditambahkan!');
+      }
       setNewVehicle({ plate_number: '', brand: '', capacity: '', compartment: '' });
+      setEditingVehicleId(null);
       fetchMasterData();
-    } catch (err) { alert('Gagal menambah armada'); }
+    } catch (err) { alert('Gagal menyimpan data armada'); }
+  };
+
+  const startEditVehicle = (vehicle) => {
+    setEditingVehicleId(vehicle.vehicle_id);
+    setNewVehicle({
+      plate_number: vehicle.plate_number,
+      brand: vehicle.brand,
+      capacity: vehicle.capacity,
+      compartment: vehicle.compartment
+    });
   };
 
   const handleDeleteVehicle = async (id) => {
@@ -178,14 +199,26 @@ export default function App() {
     }
   };
 
-  const handleAddDestination = async (e) => {
+  // CRUD MASTER DESTINATIONS
+  const handleSaveDestination = async (e) => {
     e.preventDefault();
     try {
-      await axios.post(`${API_URL}/master/destinations`, newDestination);
-      alert('Lokasi tujuan berhasil ditambahkan!');
+      if (editingDestinationId) {
+        await axios.put(`${API_URL}/master/destinations/${editingDestinationId}`, newDestination);
+        alert('Data Lokasi berhasil diperbarui!');
+      } else {
+        await axios.post(`${API_URL}/master/destinations`, newDestination);
+        alert('Lokasi tujuan berhasil ditambahkan!');
+      }
       setNewDestination({ location_name: '' });
+      setEditingDestinationId(null);
       fetchMasterData();
-    } catch (err) { alert('Gagal menambah lokasi'); }
+    } catch (err) { alert('Gagal menyimpan lokasi'); }
+  };
+
+  const startEditDestination = (dst) => {
+    setEditingDestinationId(dst.destination_id);
+    setNewDestination({ location_name: dst.location_name });
   };
 
   const handleDeleteDestination = async (id) => {
@@ -195,9 +228,7 @@ export default function App() {
     }
   };
 
-  // =============================================================
-  // TAMPILAN 1: HALAMAN LOGIN
-  // =============================================================
+  // LOGIN PAGE
   if (!user) {
     return (
       <div style={styles.loginContainer}>
@@ -207,50 +238,26 @@ export default function App() {
 
           <form onSubmit={handleLogin}>
             <label style={styles.label}>TIPE AKSES LOGIN:</label>
-            <select 
-              style={styles.select} 
-              value={loginForm.role} 
-              onChange={(e) => setLoginForm({ ...loginForm, role: e.target.value })}
-            >
+            <select style={styles.select} value={loginForm.role} onChange={(e) => setLoginForm({ ...loginForm, role: e.target.value })}>
               <option value="driver">📱 Driver / AMT</option>
               <option value="admin">📊 Manager / Admin</option>
             </select>
 
             <label style={styles.label}>USERNAME / NIK:</label>
-            <input 
-              type="text" 
-              required 
-              style={styles.input} 
-              value={loginForm.username} 
-              onChange={(e) => setLoginForm({ ...loginForm, username: e.target.value })} 
-              placeholder="Masukkan username"
-            />
+            <input type="text" required style={styles.input} value={loginForm.username} onChange={(e) => setLoginForm({ ...loginForm, username: e.target.value })} placeholder="Masukkan username" />
 
             <label style={styles.label}>PASSWORD / PIN:</label>
-            <input 
-              type="password" 
-              required 
-              style={styles.input} 
-              value={loginForm.password} 
-              onChange={(e) => setLoginForm({ ...loginForm, password: e.target.value })} 
-              placeholder="Masukkan password"
-            />
+            <input type="password" required style={styles.input} value={loginForm.password} onChange={(e) => setLoginForm({ ...loginForm, password: e.target.value })} placeholder="Masukkan password" />
 
-            <button type="submit" style={{ ...styles.bigBtn, backgroundColor: '#0056b3', marginTop: '15px' }}>
-              MASUK KE APLIKASI
-            </button>
+            <button type="submit" style={{ ...styles.bigBtn, backgroundColor: '#0056b3', marginTop: '15px' }}>MASUK KE APLIKASI</button>
           </form>
         </div>
       </div>
     );
   }
 
-  // =============================================================
-  // TAMPILAN 2: SETELAH LOGIN (AMT ATAU ADMIN)
-  // =============================================================
   return (
     <div style={styles.container}>
-      {/* Header Top Bar */}
       <div style={styles.topBar}>
         <div>
           <strong>{user.role === 'admin' ? 'Manager Operasional' : user.user.name}</strong> 
@@ -259,7 +266,6 @@ export default function App() {
         <button onClick={handleLogout} style={styles.logoutBtn}>Keluar 🚪</button>
       </div>
 
-      {/* Navigation Tab Admin */}
       {user.role === 'admin' && (
         <div style={styles.navBar}>
           <button style={activeTab === 'reports' ? styles.activeTabBtn : styles.tabBtn} onClick={() => { setActiveTab('reports'); fetchReports(); }}>📊 Laporan Logbook</button>
@@ -269,7 +275,7 @@ export default function App() {
         </div>
       )}
 
-      {/* ================= TAMPILAN AMT / DRIVER ================= */}
+      {/* AMT VIEW */}
       {user.role === 'driver' && (
         <div style={styles.mobileWrapper}>
           {!activeTrip ? (
@@ -324,10 +330,9 @@ export default function App() {
         </div>
       )}
 
-      {/* ================= TAMPILAN ADMIN / MANAGER ================= */}
+      {/* ADMIN VIEW */}
       {user.role === 'admin' && (
         <div style={styles.adminWrapper}>
-          {/* TAB 1: LAPORAN */}
           {activeTab === 'reports' && (
             <div>
               <h3>REKAP LOGBOOK PERJALANAN ARMADA</h3>
@@ -355,15 +360,20 @@ export default function App() {
             </div>
           )}
 
-          {/* TAB 2: MASTER AMT */}
+          {/* TAB MASTER AMT */}
           {activeTab === 'master_drivers' && (
             <div>
               <h3>MANAJEMEN MASTER AMT (SOPIR)</h3>
-              <form onSubmit={handleAddDriver} style={styles.formInline}>
+              <form onSubmit={handleSaveDriver} style={styles.formInline}>
                 <input type="text" placeholder="Nama Lengkap" required style={styles.inputInline} value={newDriver.name} onChange={(e) => setNewDriver({ ...newDriver, name: e.target.value })} />
                 <input type="text" placeholder="Username" required style={styles.inputInline} value={newDriver.username} onChange={(e) => setNewDriver({ ...newDriver, username: e.target.value })} />
                 <input type="password" placeholder="Password" required style={styles.inputInline} value={newDriver.password} onChange={(e) => setNewDriver({ ...newDriver, password: e.target.value })} />
-                <button type="submit" style={styles.addBtn}>+ Tambah AMT</button>
+                <button type="submit" style={editingDriverId ? styles.updateBtn : styles.addBtn}>
+                  {editingDriverId ? '💾 Simpan Perubahan' : '+ Tambah AMT'}
+                </button>
+                {editingDriverId && (
+                  <button type="button" onClick={() => { setEditingDriverId(null); setNewDriver({ name: '', username: '', password: '' }); }} style={styles.cancelBtn}>Batal</button>
+                )}
               </form>
 
               <table border="1" cellPadding="8" cellSpacing="0" style={styles.table}>
@@ -376,7 +386,10 @@ export default function App() {
                   {master.drivers.map((d) => (
                     <tr key={d.driver_id}>
                       <td>{d.driver_id}</td><td>{d.name}</td><td>{d.username || '-'}</td>
-                      <td><button onClick={() => handleDeleteDriver(d.driver_id)} style={styles.delBtn}>Hapus</button></td>
+                      <td>
+                        <button onClick={() => startEditDriver(d)} style={styles.editBtn}>✏️ Edit</button>
+                        <button onClick={() => handleDeleteDriver(d.driver_id)} style={styles.delBtn}>🗑️ Hapus</button>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -384,16 +397,21 @@ export default function App() {
             </div>
           )}
 
-          {/* TAB 3: MASTER ARMADA */}
+          {/* TAB MASTER ARMADA */}
           {activeTab === 'master_vehicles' && (
             <div>
               <h3>MANAJEMEN MASTER ARMADA (KENDARAAN)</h3>
-              <form onSubmit={handleAddVehicle} style={styles.formInline}>
+              <form onSubmit={handleSaveVehicle} style={styles.formInline}>
                 <input type="text" placeholder="Plat Nomor (EB...)" required style={styles.inputInline} value={newVehicle.plate_number} onChange={(e) => setNewVehicle({ ...newVehicle, plate_number: e.target.value })} />
                 <input type="text" placeholder="Merk (Mitsubishi/Hino)" required style={styles.inputInline} value={newVehicle.brand} onChange={(e) => setNewVehicle({ ...newVehicle, brand: e.target.value })} />
                 <input type="number" placeholder="Kapasitas (KL)" required style={styles.inputInline} value={newVehicle.capacity} onChange={(e) => setNewVehicle({ ...newVehicle, capacity: e.target.value })} />
                 <input type="text" placeholder="Kompartemen (e.g. 5 KL)" required style={styles.inputInline} value={newVehicle.compartment} onChange={(e) => setNewVehicle({ ...newVehicle, compartment: e.target.value })} />
-                <button type="submit" style={styles.addBtn}>+ Tambah Mobil</button>
+                <button type="submit" style={editingVehicleId ? styles.updateBtn : styles.addBtn}>
+                  {editingVehicleId ? '💾 Simpan Perubahan' : '+ Tambah Mobil'}
+                </button>
+                {editingVehicleId && (
+                  <button type="button" onClick={() => { setEditingVehicleId(null); setNewVehicle({ plate_number: '', brand: '', capacity: '', compartment: '' }); }} style={styles.cancelBtn}>Batal</button>
+                )}
               </form>
 
               <table border="1" cellPadding="8" cellSpacing="0" style={styles.table}>
@@ -406,7 +424,10 @@ export default function App() {
                   {master.vehicles.map((v) => (
                     <tr key={v.vehicle_id}>
                       <td>{v.vehicle_id}</td><td><strong>{v.plate_number}</strong></td><td>{v.brand}</td><td>{v.capacity} KL ({v.compartment})</td>
-                      <td><button onClick={() => handleDeleteVehicle(v.vehicle_id)} style={styles.delBtn}>Hapus</button></td>
+                      <td>
+                        <button onClick={() => startEditVehicle(v)} style={styles.editBtn}>✏️ Edit</button>
+                        <button onClick={() => handleDeleteVehicle(v.vehicle_id)} style={styles.delBtn}>🗑️ Hapus</button>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -414,13 +435,18 @@ export default function App() {
             </div>
           )}
 
-          {/* TAB 4: MASTER TUJUAN */}
+          {/* TAB MASTER TUJUAN */}
           {activeTab === 'master_destinations' && (
             <div>
               <h3>MANAJEMEN MASTER LOKASI TUJUAN</h3>
-              <form onSubmit={handleAddDestination} style={styles.formInline}>
+              <form onSubmit={handleSaveDestination} style={styles.formInline}>
                 <input type="text" placeholder="Nama Lokasi / SPBU / Site" required style={{ ...styles.inputInline, width: '300px' }} value={newDestination.location_name} onChange={(e) => setNewDestination({ location_name: e.target.value })} />
-                <button type="submit" style={styles.addBtn}>+ Tambah Tujuan</button>
+                <button type="submit" style={editingDestinationId ? styles.updateBtn : styles.addBtn}>
+                  {editingDestinationId ? '💾 Simpan Perubahan' : '+ Tambah Tujuan'}
+                </button>
+                {editingDestinationId && (
+                  <button type="button" onClick={() => { setEditingDestinationId(null); setNewDestination({ location_name: '' }); }} style={styles.cancelBtn}>Batal</button>
+                )}
               </form>
 
               <table border="1" cellPadding="8" cellSpacing="0" style={styles.table}>
@@ -433,7 +459,10 @@ export default function App() {
                   {master.destinations.map((dst) => (
                     <tr key={dst.destination_id}>
                       <td>{dst.destination_id}</td><td>{dst.location_name}</td>
-                      <td><button onClick={() => handleDeleteDestination(dst.destination_id)} style={styles.delBtn}>Hapus</button></td>
+                      <td>
+                        <button onClick={() => startEditDestination(dst)} style={styles.editBtn}>✏️ Edit</button>
+                        <button onClick={() => handleDeleteDestination(dst.destination_id)} style={styles.delBtn}>🗑️ Hapus</button>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -446,7 +475,6 @@ export default function App() {
   );
 }
 
-// Styling CSS Responsif
 const styles = {
   loginContainer: { display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '100vh', backgroundColor: '#e9ecef' },
   loginBox: { width: '100%', maxWidth: '360px', padding: '25px', backgroundColor: '#fff', borderRadius: '10px', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' },
@@ -468,5 +496,8 @@ const styles = {
   formInline: { display: 'flex', gap: '10px', marginBottom: '15px', flexWrap: 'wrap' },
   inputInline: { padding: '8px', fontSize: '14px', borderRadius: '4px', border: '1px solid #ccc' },
   addBtn: { backgroundColor: '#28a745', color: '#fff', border: 'none', padding: '8px 15px', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' },
+  updateBtn: { backgroundColor: '#ffc107', color: '#000', border: 'none', padding: '8px 15px', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' },
+  cancelBtn: { backgroundColor: '#6c757d', color: '#fff', border: 'none', padding: '8px 15px', borderRadius: '4px', cursor: 'pointer' },
+  editBtn: { backgroundColor: '#ffc107', color: '#000', border: 'none', padding: '4px 8px', borderRadius: '4px', cursor: 'pointer', fontSize: '12px', marginRight: '5px' },
   delBtn: { backgroundColor: '#dc3545', color: '#fff', border: 'none', padding: '4px 8px', borderRadius: '4px', cursor: 'pointer', fontSize: '12px' }
 };
