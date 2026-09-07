@@ -11,10 +11,11 @@ export default function App() {
   // State Master Data & Reports
   const [master, setMaster] = useState({ vehicles: [], drivers: [], destinations: [] });
   const [reports, setReports] = useState([]);
+  const [selectedPhoto, setSelectedPhoto] = useState(null); // Modal Preview Foto
   
   // State Logbook AMT
   const [tripForm, setTripForm] = useState({ vehicle_id: '', amt2_id: '', destination_name: '' });
-  const [photo, setPhoto] = useState(null);
+  const [watermarkedPhoto, setWatermarkedPhoto] = useState(null);
   const [activeTrip, setActiveTrip] = useState(null);
   const [loading, setLoading] = useState(false);
 
@@ -42,6 +43,53 @@ export default function App() {
     axios.get(`${API_URL}/reports`)
       .then((res) => setReports(res.data))
       .catch((err) => console.error('Gagal mengambil data laporan:', err));
+  };
+
+  // FUNGSI WATERMARK FOTO AUTOMATIC
+  const handlePhotoCapture = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    setLoading(true);
+    const gps = await getGPS();
+    const timeStr = new Date().toLocaleString('id-ID');
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        canvas.width = img.width;
+        canvas.height = img.height;
+
+        // Draw original photo
+        ctx.drawImage(img, 0, 0);
+
+        // Styling Watermark Banner
+        const bannerHeight = img.height * 0.12;
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.65)';
+        ctx.fillRect(0, img.height - bannerHeight, img.width, bannerHeight);
+
+        // Styling Watermark Text
+        const fontSize = Math.floor(img.width * 0.035);
+        ctx.font = `bold ${fontSize}px Arial`;
+        ctx.fillStyle = '#ffffff';
+
+        const padding = img.width * 0.03;
+        const startY = img.height - bannerHeight + (fontSize * 1.2);
+
+        ctx.fillText(`PT BINTANG AGUNG PRIMA - LOGBOOK`, padding, startY);
+        ctx.fillStyle = '#ffc107'; // Warna Kuning Emas untuk GPS & Waktu
+        ctx.fillText(`📍 GPS: ${gps}`, padding, startY + (fontSize * 1.2));
+        ctx.fillText(`⏰ ${timeStr}`, padding, startY + (fontSize * 2.4));
+
+        setWatermarkedPhoto(canvas.toDataURL('image/jpeg', 0.8));
+        setLoading(false);
+      };
+      img.src = event.target.result;
+    };
+    reader.readAsDataURL(file);
   };
 
   // LOGIN & LOGOUT
@@ -93,18 +141,17 @@ export default function App() {
     setLoading(true);
     const gps = await getGPS();
 
-    const formData = new FormData();
-    formData.append('vehicle_id', tripForm.vehicle_id);
-    formData.append('amt1_id', user.user.driver_id);
-    formData.append('amt2_id', tripForm.amt2_id);
-    formData.append('destination_name', tripForm.destination_name);
-    formData.append('start_gps', gps);
-    if (photo) formData.append('photo', photo);
-
     try {
-      const res = await axios.post(`${API_URL}/trips/start`, formData);
+      const res = await axios.post(`${API_URL}/trips/start`, {
+        vehicle_id: tripForm.vehicle_id,
+        amt1_id: user.user.driver_id,
+        amt2_id: tripForm.amt2_id,
+        destination_name: tripForm.destination_name,
+        start_gps: gps,
+        photo_base64: watermarkedPhoto
+      });
       setActiveTrip(res.data.trip);
-      setPhoto(null);
+      setWatermarkedPhoto(null);
       alert('🚀 Perjalanan Resmi Dimulai! Selamat Jalan.');
     } catch (err) {
       alert('Gagal memulai perjalanan: ' + err.message);
@@ -117,16 +164,15 @@ export default function App() {
     setLoading(true);
     const gps = await getGPS();
 
-    const formData = new FormData();
-    formData.append('trip_id', activeTrip.trip_id);
-    formData.append('vehicle_id', activeTrip.vehicle_id);
-    formData.append('end_gps', gps);
-    if (photo) formData.append('photo', photo);
-
     try {
-      await axios.post(`${API_URL}/trips/end`, formData);
+      await axios.post(`${API_URL}/trips/end`, {
+        trip_id: activeTrip.trip_id,
+        vehicle_id: activeTrip.vehicle_id,
+        end_gps: gps,
+        photo_base64: watermarkedPhoto
+      });
       setActiveTrip(null);
-      setPhoto(null);
+      setWatermarkedPhoto(null);
       setTripForm({ vehicle_id: '', amt2_id: '', destination_name: '' });
       alert('🛑 Perjalanan Selesai! Logbook Tercatat.');
     } catch (err) {
@@ -308,9 +354,16 @@ export default function App() {
               </select>
 
               <label style={styles.label}>📷 FOTO ABSENSI SEBELUM KELUAR DEPO:</label>
-              <input type="file" accept="image/*" capture="environment" onChange={(e) => setPhoto(e.target.files[0])} style={styles.fileInput} />
+              <input type="file" accept="image/*" capture="environment" onChange={handlePhotoCapture} style={styles.fileInput} />
 
-              <button style={{ ...styles.bigBtn, backgroundColor: '#28a745' }} onClick={handleStartTrip} disabled={loading}>
+              {watermarkedPhoto && (
+                <div style={{ marginBottom: '15px' }}>
+                  <small style={{ fontWeight: 'bold', color: 'green' }}>✓ Watermark GPS & Waktu Terpasang:</small>
+                  <img src={watermarkedPhoto} alt="Preview" style={{ width: '100%', borderRadius: '5px', marginTop: '5px' }} />
+                </div>
+              )}
+
+              <button style={{ ...styles.bigBtn, backgroundColor: '#28a745' }} onClick={handleStartTrip} disabled={loading || !watermarkedPhoto}>
                 {loading ? 'MEMPROSES...' : '🚀 MULAI PERJALANAN'}
               </button>
             </div>
@@ -320,9 +373,16 @@ export default function App() {
               <p style={{ fontSize: '18px' }}>Tujuan: <strong>{activeTrip.destination_name}</strong></p>
 
               <label style={styles.label}>📷 FOTO ABSENSI SAAT TIBA DI TUJUAN:</label>
-              <input type="file" accept="image/*" capture="environment" onChange={(e) => setPhoto(e.target.files[0])} style={styles.fileInput} />
+              <input type="file" accept="image/*" capture="environment" onChange={handlePhotoCapture} style={styles.fileInput} />
 
-              <button style={{ ...styles.bigBtn, backgroundColor: '#dc3545' }} onClick={handleEndTrip} disabled={loading}>
+              {watermarkedPhoto && (
+                <div style={{ marginBottom: '15px' }}>
+                  <small style={{ fontWeight: 'bold', color: 'green' }}>✓ Watermark GPS & Waktu Terpasang:</small>
+                  <img src={watermarkedPhoto} alt="Preview" style={{ width: '100%', borderRadius: '5px', marginTop: '5px' }} />
+                </div>
+              )}
+
+              <button style={{ ...styles.bigBtn, backgroundColor: '#dc3545' }} onClick={handleEndTrip} disabled={loading || !watermarkedPhoto}>
                 {loading ? 'MEMPROSES...' : '🛑 TIBA & SELESAI JALAN'}
               </button>
             </div>
@@ -339,7 +399,7 @@ export default function App() {
               <table border="1" cellPadding="8" cellSpacing="0" style={styles.table}>
                 <thead>
                   <tr style={{ backgroundColor: '#0056b3', color: '#fff' }}>
-                    <th>ID</th><th>Plat Mobil</th><th>AMT 1</th><th>AMT 2</th><th>Tujuan</th><th>Waktu Berangkat</th><th>Waktu Tiba</th><th>Status</th>
+                    <th>ID</th><th>Plat Mobil</th><th>AMT 1</th><th>AMT 2</th><th>Tujuan</th><th>Berangkat & Lokasi</th><th>Tiba & Lokasi</th><th>Foto Absen</th><th>Status</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -350,8 +410,18 @@ export default function App() {
                       <td>{r.amt1_name}</td>
                       <td>{r.amt2_name || '-'}</td>
                       <td>{r.destination_name}</td>
-                      <td>{new Date(r.start_time).toLocaleString('id-ID')}</td>
-                      <td>{r.end_time ? new Date(r.end_time).toLocaleString('id-ID') : '-'}</td>
+                      <td>
+                        {new Date(r.start_time).toLocaleString('id-ID')}<br/>
+                        {r.start_gps && <a href={`https://maps.google.com/?q=${r.start_gps}`} target="_blank" rel="noreferrer" style={styles.mapLink}>📍 Maps Berangkat</a>}
+                      </td>
+                      <td>
+                        {r.end_time ? new Date(r.end_time).toLocaleString('id-ID') : '-'}<br/>
+                        {r.end_gps && <a href={`https://maps.google.com/?q=${r.end_gps}`} target="_blank" rel="noreferrer" style={styles.mapLink}>📍 Maps Tiba</a>}
+                      </td>
+                      <td>
+                        {r.start_photo && <button onClick={() => setSelectedPhoto(r.start_photo)} style={styles.photoBtn}>📷 Foto Berangkat</button>}
+                        {r.end_photo && <button onClick={() => setSelectedPhoto(r.end_photo)} style={{ ...styles.photoBtn, backgroundColor: '#17a2b8' }}>📷 Foto Tiba</button>}
+                      </td>
                       <td style={{ color: r.status === 'COMPLETED' ? 'green' : 'orange', fontWeight: 'bold' }}>{r.status}</td>
                     </tr>
                   ))}
@@ -471,6 +541,19 @@ export default function App() {
           )}
         </div>
       )}
+
+      {/* MODAL POPUP PREVIEW FOTO WATERMARK */}
+      {selectedPhoto && (
+        <div style={styles.modalOverlay} onClick={() => setSelectedPhoto(null)}>
+          <div style={styles.modalContent} onClick={(e) => e.stopPropagation()}>
+            <h3 style={{ marginTop: 0 }}>📷 Foto Absensi Verifikasi</h3>
+            <img src={selectedPhoto} alt="Watermarked Absen" style={{ width: '100%', borderRadius: '8px' }} />
+            <button onClick={() => setSelectedPhoto(null)} style={{ ...styles.bigBtn, backgroundColor: '#dc3545', marginTop: '15px' }}>
+              Tutup Foto ✖
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -489,7 +572,7 @@ const styles = {
   label: { display: 'block', fontWeight: 'bold', fontSize: '13px', marginTop: '12px', marginBottom: '4px' },
   input: { width: '100%', padding: '10px', fontSize: '14px', borderRadius: '5px', border: '1px solid #ccc', boxSizing: 'border-box' },
   select: { width: '100%', padding: '10px', fontSize: '15px', borderRadius: '5px', border: '1px solid #ccc', backgroundColor: '#fff' },
-  fileInput: { width: '100%', padding: '8px', fontSize: '13px', marginBottom: '15px', backgroundColor: '#f8f9fa', border: '1px solid #ddd', borderRadius: '5px' },
+  fileInput: { width: '100%', padding: '8px', fontSize: '13px', marginBottom: '10px', backgroundColor: '#f8f9fa', border: '1px solid #ddd', borderRadius: '5px' },
   bigBtn: { width: '100%', padding: '15px', fontSize: '16px', fontWeight: 'bold', color: '#fff', border: 'none', borderRadius: '8px', cursor: 'pointer' },
   adminWrapper: { maxWidth: '1100px', margin: '20px auto', padding: '20px', backgroundColor: '#fff', borderRadius: '8px', boxShadow: '0 2px 8px rgba(0,0,0,0.1)' },
   table: { width: '100%', borderCollapse: 'collapse', marginTop: '15px' },
@@ -499,5 +582,9 @@ const styles = {
   updateBtn: { backgroundColor: '#ffc107', color: '#000', border: 'none', padding: '8px 15px', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' },
   cancelBtn: { backgroundColor: '#6c757d', color: '#fff', border: 'none', padding: '8px 15px', borderRadius: '4px', cursor: 'pointer' },
   editBtn: { backgroundColor: '#ffc107', color: '#000', border: 'none', padding: '4px 8px', borderRadius: '4px', cursor: 'pointer', fontSize: '12px', marginRight: '5px' },
-  delBtn: { backgroundColor: '#dc3545', color: '#fff', border: 'none', padding: '4px 8px', borderRadius: '4px', cursor: 'pointer', fontSize: '12px' }
+  delBtn: { backgroundColor: '#dc3545', color: '#fff', border: 'none', padding: '4px 8px', borderRadius: '4px', cursor: 'pointer', fontSize: '12px' },
+  mapLink: { display: 'inline-block', fontSize: '12px', color: '#0056b3', marginTop: '3px', fontWeight: 'bold' },
+  photoBtn: { backgroundColor: '#28a745', color: '#fff', border: 'none', padding: '5px 8px', borderRadius: '4px', cursor: 'pointer', fontSize: '11px', margin: '2px' },
+  modalOverlay: { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.75)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 },
+  modalContent: { backgroundColor: '#fff', padding: '20px', borderRadius: '10px', maxWidth: '500px', width: '90%' }
 };
