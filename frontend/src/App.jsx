@@ -251,6 +251,19 @@ export default function App() {
     }
   };
 
+  // FUNGSI HAPUS TRIP KHUSUS ADMIN
+  const handleDeleteTrip = async (tripId) => {
+    if (window.confirm(`Yakin ingin menghapus data perjalanan #${tripId}? Status armada terkait akan otomatis dipulihkan.`)) {
+      try {
+        await axios.delete(`${API_URL}/trips/${tripId}`);
+        alert('Data perjalanan berhasil dihapus!');
+        fetchReports();
+      } catch (err) {
+        alert('Gagal menghapus data perjalanan: ' + err.message);
+      }
+    }
+  };
+
   // CRUD MASTER HANDLERS
   const handleSaveDriver = async (e) => {
     e.preventDefault();
@@ -548,7 +561,7 @@ export default function App() {
               <table border="1" cellPadding="8" cellSpacing="0" style={styles.table}>
                 <thead>
                   <tr style={{ backgroundColor: '#0056b3', color: '#fff' }}>
-                    <th>ID</th><th>Plat Mobil</th><th>AMT Utama / Pendamping</th><th>Tujuan / Konsumen</th><th>Muatan BBM</th><th>Berangkat & Tiba</th><th>Catatan / Kendala</th><th>Foto Absen</th><th>Status</th>
+                    <th>ID</th><th>Plat Mobil</th><th>AMT Utama / Pendamping</th><th>Tujuan / Konsumen</th><th>Muatan BBM</th><th>Berangkat & Tiba</th><th>Catatan / Kendala</th><th>Foto Absen</th><th>Status</th><th>Aksi</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -577,6 +590,9 @@ export default function App() {
                         {r.end_photo && <button onClick={() => setSelectedPhoto(r.end_photo)} style={{ ...styles.photoBtn, backgroundColor: '#17a2b8' }}>📷 Foto Tiba</button>}
                       </td>
                       <td style={{ color: r.status === 'COMPLETED' ? 'green' : 'orange', fontWeight: 'bold' }}>{r.status}</td>
+                      <td>
+                        <button onClick={() => handleDeleteTrip(r.trip_id)} style={styles.delBtn}>🗑️ Hapus</button>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
