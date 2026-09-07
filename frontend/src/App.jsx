@@ -56,8 +56,8 @@ export default function App() {
         }
       }
     } catch (err) {
-      // Ambil pesan error berupa teks string, bukan objek
-      const msg = err.response?.data?.error || err.message || 'Login gagal!';
+      // Ambil teks pesan error yang dikirim backend
+      const msg = err.response?.data?.error || err.message || 'Login gagal, periksa koneksi!';
       alert(msg);
     }
   };
