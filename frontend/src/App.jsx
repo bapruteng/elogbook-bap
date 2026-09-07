@@ -11,6 +11,9 @@ export default function App() {
   const [loginForm, setLoginForm] = useState({ username: '', password: '', role: 'driver' });
   const [activeTab, setActiveTab] = useState('trip');
   
+  // State Offline Detection & Sync
+  const [isOffline, setIsOffline] = useState(!navigator.onLine);
+
   // State Master Data & Reports
   const [master, setMaster] = useState({ vehicles: [], drivers: [], destinations: [] });
   const [reports, setReports] = useState([]);
@@ -44,8 +47,34 @@ export default function App() {
   const [newDestination, setNewDestination] = useState({ location_name: '' });
   const [editingDestinationId, setEditingDestinationId] = useState(null);
 
+  // LISTEN KONEKSI OFFLINE & AUTO-SYNC DRAFT
   useEffect(() => {
     fetchMasterData();
+
+    const handleOnline = () => {
+      setIsOffline(false);
+      const pendingTrip = localStorage.getItem('pending_offline_trip');
+      if (pendingTrip) {
+        alert('🌐 Sinyal terhubung kembali! Mengirimkan data draft logbook...');
+        const payload = JSON.parse(pendingTrip);
+        axios.post(`${API_URL}/trips/start`, payload)
+          .then(() => {
+            localStorage.removeItem('pending_offline_trip');
+            alert('✅ Draft logbook offline berhasil tersinkronisasi ke server!');
+          })
+          .catch((err) => console.error('Gagal sync offline:', err));
+      }
+    };
+
+    const handleOffline = () => setIsOffline(true);
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
   }, []);
 
   const fetchMasterData = () => {
@@ -187,7 +216,7 @@ export default function App() {
     setActiveTrip(null);
   };
 
-  // LOGBOOK AMT
+  // LOGBOOK AMT (DENGAN SUPPORT OFFLINE DRAFT)
   const getGPS = () => {
     return new Promise((resolve) => {
       if (!navigator.geolocation) {
@@ -210,13 +239,25 @@ export default function App() {
     setLoading(true);
     const gps = await getGPS();
 
+    const payload = {
+      ...tripForm,
+      amt1_id: user.user.driver_id,
+      start_gps: gps,
+      photo_base64: watermarkedPhoto
+    };
+
+    // JIKA OFFLINE Simpan ke LocalStorage
+    if (isOffline) {
+      localStorage.setItem('pending_offline_trip', JSON.stringify(payload));
+      setActiveTrip({ destination_name: tripForm.destination_name, fuel_type: tripForm.fuel_type, fuel_volume: tripForm.fuel_volume });
+      setWatermarkedPhoto(null);
+      setLoading(false);
+      alert('⚠️ Sinyal Terputus! Logbook disimpan sebagai Draft Lokal dan akan dikirim otomatis begitu ada sinyal.');
+      return;
+    }
+
     try {
-      const res = await axios.post(`${API_URL}/trips/start`, {
-        ...tripForm,
-        amt1_id: user.user.driver_id,
-        start_gps: gps,
-        photo_base64: watermarkedPhoto
-      });
+      const res = await axios.post(`${API_URL}/trips/start`, payload);
       setActiveTrip(res.data.trip);
       setWatermarkedPhoto(null);
       alert('🚀 Perjalanan Resmi Dimulai! Selamat Jalan.');
@@ -251,7 +292,7 @@ export default function App() {
     }
   };
 
-  // FUNGSI HAPUS TRIP KHUSUS ADMIN
+  // HAPUS TRIP ADMIN
   const handleDeleteTrip = async (tripId) => {
     if (window.confirm(`Yakin ingin menghapus data perjalanan #${tripId}? Status armada terkait akan otomatis dipulihkan.`)) {
       try {
@@ -354,7 +395,7 @@ export default function App() {
     }
   };
 
-  // DASHBOARD STATS
+  // STATS
   const inProgressCount = reports.filter(r => r.status === 'IN_PROGRESS').length;
   const completedCount = reports.filter(r => r.status === 'COMPLETED').length;
   const totalVolumeKL = reports.reduce((acc, r) => acc + (parseFloat(r.fuel_volume) || 0), 0);
@@ -396,6 +437,13 @@ export default function App() {
         </div>
         <button onClick={handleLogout} style={styles.logoutBtn}>Keluar 🚪</button>
       </div>
+
+      {/* BANNER INDICATOR OFFLINE */}
+      {isOffline && (
+        <div style={{ backgroundColor: '#dc3545', color: '#fff', textAlign: 'center', padding: '8px', fontSize: '13px', fontWeight: 'bold' }}>
+          ⚠️ Anda sedang Offline (Sinyal Hilang). Input logbook akan disimpan sementara sebagai Draft Lokal.
+        </div>
+      )}
 
       {user.role === 'admin' && (
         <div style={styles.navBar}>
