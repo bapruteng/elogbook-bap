@@ -56,7 +56,9 @@ export default function App() {
         }
       }
     } catch (err) {
-      alert(err.response?.data?.error || 'Login gagal, periksa username/password!');
+      // Ambil pesan error berupa teks string, bukan objek
+      const msg = err.response?.data?.error || err.message || 'Login gagal!';
+      alert(msg);
     }
   };
 
