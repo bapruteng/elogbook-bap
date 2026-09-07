@@ -1,5 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
+import * as XLSX from 'xlsx';
+import jsPDF from 'jspdf';
+import 'jspdf-autotable';
 
 const API_URL = '/api';
 
@@ -11,15 +14,22 @@ export default function App() {
   // State Master Data & Reports
   const [master, setMaster] = useState({ vehicles: [], drivers: [], destinations: [] });
   const [reports, setReports] = useState([]);
-  const [selectedPhoto, setSelectedPhoto] = useState(null); // Modal Preview Foto
+  const [selectedPhoto, setSelectedPhoto] = useState(null);
   
   // State Logbook AMT
-  const [tripForm, setTripForm] = useState({ vehicle_id: '', amt2_id: '', destination_name: '' });
+  const [tripForm, setTripForm] = useState({
+    vehicle_id: '',
+    amt2_id: '',
+    destination_name: '',
+    customer_name: '',
+    fuel_type: 'Biosolar',
+    fuel_volume: ''
+  });
   const [watermarkedPhoto, setWatermarkedPhoto] = useState(null);
   const [activeTrip, setActiveTrip] = useState(null);
   const [loading, setLoading] = useState(false);
 
-  // State Form Tambah/Edit Master Data
+  // State Master Forms
   const [newDriver, setNewDriver] = useState({ name: '', username: '', password: '' });
   const [editingDriverId, setEditingDriverId] = useState(null);
 
@@ -45,7 +55,53 @@ export default function App() {
       .catch((err) => console.error('Gagal mengambil data laporan:', err));
   };
 
-  // FUNGSI WATERMARK FOTO AUTOMATIC
+  // EXPORT EXCEL
+  const exportToExcel = () => {
+    const dataToExport = reports.map(r => ({
+      'ID Trip': r.trip_id,
+      'No Polisi': r.plate_number,
+      'AMT Utama': r.amt1_name,
+      'AMT Pendamping': r.amt2_name || '-',
+      'Tujuan': r.destination_name,
+      'Konsumen / SPBU': r.customer_name || '-',
+      'Jenis BBM': r.fuel_type || '-',
+      'Volume (KL)': r.fuel_volume || 0,
+      'Waktu Berangkat': new Date(r.start_time).toLocaleString('id-ID'),
+      'Waktu Tiba': r.end_time ? new Date(r.end_time).toLocaleString('id-ID') : '-',
+      'Status': r.status
+    }));
+
+    const worksheet = XLSX.utils.json_to_sheet(dataToExport);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Laporan Logbook");
+    XLSX.writeFile(workbook, `Logbook_BAP_${new Date().toISOString().slice(0,10)}.xlsx`);
+  };
+
+  // EXPORT PDF
+  const exportToPDF = () => {
+    const doc = new jsPDF('landscape');
+    doc.text("PT BINTANG AGUNG PRIMA - LAPORAN LOGBOOK ARMADA BBM", 14, 15);
+    doc.setFontSize(10);
+    doc.text(`Dicetak Tanggal: ${new Date().toLocaleString('id-ID')}`, 14, 22);
+
+    const tableColumn = ["ID", "No Polisi", "AMT 1", "AMT 2", "Tujuan / Konsumen", "BBM", "Vol (KL)", "Berangkat", "Status"];
+    const tableRows = reports.map(r => [
+      `#${r.trip_id}`,
+      r.plate_number,
+      r.amt1_name,
+      r.amt2_name || '-',
+      `${r.destination_name}\n(${r.customer_name || '-'})`,
+      r.fuel_type || '-',
+      r.fuel_volume || 0,
+      new Date(r.start_time).toLocaleString('id-ID'),
+      r.status
+    ]);
+
+    doc.autoTable({ head: [tableColumn], body: tableRows, startY: 28 });
+    doc.save(`Laporan_BAP_${new Date().toISOString().slice(0,10)}.pdf`);
+  };
+
+  // WATERMARK FOTO
   const handlePhotoCapture = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -63,15 +119,12 @@ export default function App() {
         canvas.width = img.width;
         canvas.height = img.height;
 
-        // Draw original photo
         ctx.drawImage(img, 0, 0);
 
-        // Styling Watermark Banner
         const bannerHeight = img.height * 0.12;
         ctx.fillStyle = 'rgba(0, 0, 0, 0.65)';
         ctx.fillRect(0, img.height - bannerHeight, img.width, bannerHeight);
 
-        // Styling Watermark Text
         const fontSize = Math.floor(img.width * 0.035);
         ctx.font = `bold ${fontSize}px Arial`;
         ctx.fillStyle = '#ffffff';
@@ -80,7 +133,7 @@ export default function App() {
         const startY = img.height - bannerHeight + (fontSize * 1.2);
 
         ctx.fillText(`PT BINTANG AGUNG PRIMA - LOGBOOK`, padding, startY);
-        ctx.fillStyle = '#ffc107'; // Warna Kuning Emas untuk GPS & Waktu
+        ctx.fillStyle = '#ffc107';
         ctx.fillText(`📍 GPS: ${gps}`, padding, startY + (fontSize * 1.2));
         ctx.fillText(`⏰ ${timeStr}`, padding, startY + (fontSize * 2.4));
 
@@ -143,10 +196,8 @@ export default function App() {
 
     try {
       const res = await axios.post(`${API_URL}/trips/start`, {
-        vehicle_id: tripForm.vehicle_id,
+        ...tripForm,
         amt1_id: user.user.driver_id,
-        amt2_id: tripForm.amt2_id,
-        destination_name: tripForm.destination_name,
         start_gps: gps,
         photo_base64: watermarkedPhoto
       });
@@ -173,7 +224,7 @@ export default function App() {
       });
       setActiveTrip(null);
       setWatermarkedPhoto(null);
-      setTripForm({ vehicle_id: '', amt2_id: '', destination_name: '' });
+      setTripForm({ vehicle_id: '', amt2_id: '', destination_name: '', customer_name: '', fuel_type: 'Biosolar', fuel_volume: '' });
       alert('🛑 Perjalanan Selesai! Logbook Tercatat.');
     } catch (err) {
       alert('Gagal mengakhiri perjalanan: ' + err.message);
@@ -182,7 +233,7 @@ export default function App() {
     }
   };
 
-  // CRUD MASTER DRIVERS
+  // CRUD MASTER HANDLERS
   const handleSaveDriver = async (e) => {
     e.preventDefault();
     try {
@@ -211,7 +262,6 @@ export default function App() {
     }
   };
 
-  // CRUD MASTER VEHICLES
   const handleSaveVehicle = async (e) => {
     e.preventDefault();
     try {
@@ -245,7 +295,6 @@ export default function App() {
     }
   };
 
-  // CRUD MASTER DESTINATIONS
   const handleSaveDestination = async (e) => {
     e.preventDefault();
     try {
@@ -273,6 +322,11 @@ export default function App() {
       fetchMasterData();
     }
   };
+
+  // HITUNG DASHBOARD STATISTIK
+  const inProgressCount = reports.filter(r => r.status === 'IN_PROGRESS').length;
+  const completedCount = reports.filter(r => r.status === 'COMPLETED').length;
+  const totalVolumeKL = reports.reduce((acc, r) => acc + (parseFloat(r.fuel_volume) || 0), 0);
 
   // LOGIN PAGE
   if (!user) {
@@ -330,7 +384,10 @@ export default function App() {
               <p>AMT Utama: <strong>{user.user.name}</strong></p>
 
               <label style={styles.label}>PILIH NOMOR POLISI ARMADA:</label>
-              <select style={styles.select} value={tripForm.vehicle_id} onChange={(e) => setTripForm({ ...tripForm, vehicle_id: e.target.value })}>
+              <select style={styles.select} value={tripForm.vehicle_id} onChange={(e) => {
+                const v = master.vehicles.find(x => x.vehicle_id === parseInt(e.target.value));
+                setTripForm({ ...tripForm, vehicle_id: e.target.value, fuel_volume: v ? v.capacity : '' });
+              }}>
                 <option value="">-- Pilih Plat Mobil --</option>
                 {master.vehicles.map((v) => (
                   <option key={v.vehicle_id} value={v.vehicle_id}>{v.plate_number} ({v.brand} - {v.capacity} KL)</option>
@@ -345,13 +402,32 @@ export default function App() {
                 ))}
               </select>
 
-              <label style={styles.label}>TUJUAN PENGIRIMAN:</label>
-              <select style={styles.select} value={tripForm.destination_name} onChange={(e) => setTripForm({ ...tripForm, destination_name: e.target.value })}>
+              <label style={styles.label}>LOKASI TUJUAN PENGIRIMAN:</label>
+              <select style={styles.select} value={tripForm.destination_name} onChange={(e) => setTripForm({ ...tripForm, destination_name: e.target.value, customer_name: e.target.value })}>
                 <option value="">-- Pilih Lokasi Tujuan --</option>
                 {master.destinations.map((dst) => (
                   <option key={dst.destination_id} value={dst.location_name}>{dst.location_name}</option>
                 ))}
               </select>
+
+              <label style={styles.label}>NAMA KONSUMEN / SPBU / SITE:</label>
+              <input type="text" style={styles.input} value={tripForm.customer_name} onChange={(e) => setTripForm({ ...tripForm, customer_name: e.target.value })} placeholder="Contoh: SPBU Ruteng / PT X" />
+
+              <div style={{ display: 'flex', gap: '10px' }}>
+                <div style={{ flex: 1 }}>
+                  <label style={styles.label}>JENIS BBM:</label>
+                  <select style={styles.select} value={tripForm.fuel_type} onChange={(e) => setTripForm({ ...tripForm, fuel_type: e.target.value })}>
+                    <option value="Biosolar">Biosolar</option>
+                    <option value="Pertalite">Pertalite</option>
+                    <option value="Pertamax">Pertamax</option>
+                    <option value="Dexlite">Dexlite</option>
+                  </select>
+                </div>
+                <div style={{ flex: 1 }}>
+                  <label style={styles.label}>MUATAN (KL):</label>
+                  <input type="number" style={styles.input} value={tripForm.fuel_volume} onChange={(e) => setTripForm({ ...tripForm, fuel_volume: e.target.value })} placeholder="KL" />
+                </div>
+              </div>
 
               <label style={styles.label}>📷 FOTO ABSENSI SEBELUM KELUAR DEPO:</label>
               <input type="file" accept="image/*" capture="environment" onChange={handlePhotoCapture} style={styles.fileInput} />
@@ -370,7 +446,8 @@ export default function App() {
           ) : (
             <div style={{ ...styles.card, border: '2px solid #ffc107', backgroundColor: '#fff8e6' }}>
               <h3 style={{ marginTop: 0, color: '#856404' }}>Status: SEDANG BERJALAN</h3>
-              <p style={{ fontSize: '18px' }}>Tujuan: <strong>{activeTrip.destination_name}</strong></p>
+              <p style={{ fontSize: '16px' }}>Tujuan: <strong>{activeTrip.destination_name}</strong></p>
+              <p style={{ fontSize: '14px', color: '#555' }}>Muatan: <strong>{activeTrip.fuel_volume} KL ({activeTrip.fuel_type})</strong></p>
 
               <label style={styles.label}>📷 FOTO ABSENSI SAAT TIBA DI TUJUAN:</label>
               <input type="file" accept="image/*" capture="environment" onChange={handlePhotoCapture} style={styles.fileInput} />
@@ -395,11 +472,34 @@ export default function App() {
         <div style={styles.adminWrapper}>
           {activeTab === 'reports' && (
             <div>
-              <h3>REKAP LOGBOOK PERJALANAN ARMADA</h3>
+              {/* STATISTIC CARDS */}
+              <div style={styles.statsGrid}>
+                <div style={{ ...styles.statCard, borderLeft: '5px solid #ffc107' }}>
+                  <small>Armada Beroperasi</small>
+                  <h2>{inProgressCount} Unit</h2>
+                </div>
+                <div style={{ ...styles.statCard, borderLeft: '5px solid #28a745' }}>
+                  <small>Pengiriman Selesai</small>
+                  <h2>{completedCount} Perjalanan</h2>
+                </div>
+                <div style={{ ...styles.statCard, borderLeft: '5px solid #17a2b8' }}>
+                  <small>Total Volume Distributif</small>
+                  <h2>{totalVolumeKL} KL</h2>
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '20px' }}>
+                <h3 style={{ margin: 0 }}>REKAP LOGBOOK PERJALANAN ARMADA</h3>
+                <div>
+                  <button onClick={exportToExcel} style={styles.excelBtn}>📊 Export Excel</button>
+                  <button onClick={exportToPDF} style={styles.pdfBtn}>📄 Export PDF</button>
+                </div>
+              </div>
+
               <table border="1" cellPadding="8" cellSpacing="0" style={styles.table}>
                 <thead>
                   <tr style={{ backgroundColor: '#0056b3', color: '#fff' }}>
-                    <th>ID</th><th>Plat Mobil</th><th>AMT 1</th><th>AMT 2</th><th>Tujuan</th><th>Berangkat & Lokasi</th><th>Tiba & Lokasi</th><th>Foto Absen</th><th>Status</th>
+                    <th>ID</th><th>Plat Mobil</th><th>AMT Utama / Pendamping</th><th>Tujuan / Konsumen</th><th>Muatan BBM</th><th>Waktu Berangkat</th><th>Waktu Tiba</th><th>Foto Absen</th><th>Status</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -407,9 +507,15 @@ export default function App() {
                     <tr key={r.trip_id}>
                       <td>#{r.trip_id}</td>
                       <td><strong>{r.plate_number}</strong></td>
-                      <td>{r.amt1_name}</td>
-                      <td>{r.amt2_name || '-'}</td>
-                      <td>{r.destination_name}</td>
+                      <td>
+                        <strong>{r.amt1_name}</strong><br/>
+                        <small style={{ color: '#666' }}>{r.amt2_name ? `+ ${r.amt2_name}` : '(Solo)'}</small>
+                      </td>
+                      <td>
+                        <strong>{r.destination_name}</strong><br/>
+                        <small style={{ color: '#0056b3' }}>Konsumen: {r.customer_name || '-'}</small>
+                      </td>
+                      <td><strong>{r.fuel_volume || 0} KL</strong><br/><small>{r.fuel_type}</small></td>
                       <td>
                         {new Date(r.start_time).toLocaleString('id-ID')}<br/>
                         {r.start_gps && <a href={`https://maps.google.com/?q=${r.start_gps}`} target="_blank" rel="noreferrer" style={styles.mapLink}>📍 Maps Berangkat</a>}
@@ -430,7 +536,7 @@ export default function App() {
             </div>
           )}
 
-          {/* TAB MASTER AMT */}
+          {/* TAB MASTER DATA */}
           {activeTab === 'master_drivers' && (
             <div>
               <h3>MANAJEMEN MASTER AMT (SOPIR)</h3>
@@ -467,7 +573,6 @@ export default function App() {
             </div>
           )}
 
-          {/* TAB MASTER ARMADA */}
           {activeTab === 'master_vehicles' && (
             <div>
               <h3>MANAJEMEN MASTER ARMADA (KENDARAAN)</h3>
@@ -505,7 +610,6 @@ export default function App() {
             </div>
           )}
 
-          {/* TAB MASTER TUJUAN */}
           {activeTab === 'master_destinations' && (
             <div>
               <h3>MANAJEMEN MASTER LOKASI TUJUAN</h3>
@@ -574,7 +678,7 @@ const styles = {
   select: { width: '100%', padding: '10px', fontSize: '15px', borderRadius: '5px', border: '1px solid #ccc', backgroundColor: '#fff' },
   fileInput: { width: '100%', padding: '8px', fontSize: '13px', marginBottom: '10px', backgroundColor: '#f8f9fa', border: '1px solid #ddd', borderRadius: '5px' },
   bigBtn: { width: '100%', padding: '15px', fontSize: '16px', fontWeight: 'bold', color: '#fff', border: 'none', borderRadius: '8px', cursor: 'pointer' },
-  adminWrapper: { maxWidth: '1100px', margin: '20px auto', padding: '20px', backgroundColor: '#fff', borderRadius: '8px', boxShadow: '0 2px 8px rgba(0,0,0,0.1)' },
+  adminWrapper: { maxWidth: '1150px', margin: '20px auto', padding: '20px', backgroundColor: '#fff', borderRadius: '8px', boxShadow: '0 2px 8px rgba(0,0,0,0.1)' },
   table: { width: '100%', borderCollapse: 'collapse', marginTop: '15px' },
   formInline: { display: 'flex', gap: '10px', marginBottom: '15px', flexWrap: 'wrap' },
   inputInline: { padding: '8px', fontSize: '14px', borderRadius: '4px', border: '1px solid #ccc' },
@@ -586,5 +690,9 @@ const styles = {
   mapLink: { display: 'inline-block', fontSize: '12px', color: '#0056b3', marginTop: '3px', fontWeight: 'bold' },
   photoBtn: { backgroundColor: '#28a745', color: '#fff', border: 'none', padding: '5px 8px', borderRadius: '4px', cursor: 'pointer', fontSize: '11px', margin: '2px' },
   modalOverlay: { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.75)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 },
-  modalContent: { backgroundColor: '#fff', padding: '20px', borderRadius: '10px', maxWidth: '500px', width: '90%' }
+  modalContent: { backgroundColor: '#fff', padding: '20px', borderRadius: '10px', maxWidth: '500px', width: '90%' },
+  statsGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '15px', marginBottom: '10px' },
+  statCard: { backgroundColor: '#f8f9fa', padding: '15px', borderRadius: '6px', boxShadow: '0 1px 4px rgba(0,0,0,0.05)' },
+  excelBtn: { backgroundColor: '#1d6f42', color: '#fff', border: 'none', padding: '8px 12px', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', marginRight: '8px' },
+  pdfBtn: { backgroundColor: '#b30b00', color: '#fff', border: 'none', padding: '8px 12px', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }
 };
