@@ -21,21 +21,13 @@ const pool = new Pool({
   ssl: { rejectUnauthorized: false }
 });
 
-// Helper Function: Kirim Notifikasi WA via Fonnte
 function sendWhatsAppNotification(message) {
   const token = process.env.WA_API_TOKEN;
   const target = process.env.WA_TARGET_PHONE;
 
-  if (!token || !target) {
-    console.log('WA Notification skipped: Token atau Target HP belum diset di Vercel Env.');
-    return;
-  }
+  if (!token || !target) return;
 
-  const postData = JSON.stringify({
-    target: target,
-    message: message
-  });
-
+  const postData = JSON.stringify({ target: target, message: message });
   const options = {
     hostname: 'api.fonnte.com',
     path: '/send',
@@ -50,15 +42,8 @@ function sendWhatsAppNotification(message) {
   const req = https.request(options, (res) => {
     let data = '';
     res.on('data', (chunk) => { data += chunk; });
-    res.on('end', () => {
-      console.log('Fonnte Response OK:', data);
-    });
   });
-
-  req.on('error', (e) => {
-    console.error('Fonnte Request Error:', e.message);
-  });
-
+  req.on('error', (e) => console.error('Fonnte Error:', e.message));
   req.write(postData);
   req.end();
 }
@@ -201,7 +186,7 @@ app.delete(['/destinations/:id', '/master/destinations/:id'], async (req, res) =
   }
 });
 
-// 5. TRIPS LOGBOOK
+// 5. TRIPS LOGBOOK (JOIN LENGKAP DENGAN TABEL DRIVERS & VEHICLES)
 app.get(['/trips', '/reports'], async (req, res) => {
   try {
     const { start_date, end_date, vehicle_id } = req.query;
@@ -245,7 +230,7 @@ app.get(['/trips', '/reports'], async (req, res) => {
   }
 });
 
-// START TRIP (AMBIL LANGSUNG DETAILS DRIVER & VEHICLE TANPA DEPENDENCY FAIL)
+// START TRIP (BILA ADA ID, BACA AMAN CEPAT MENGGUNAKAN Promise.all)
 app.post(['/trips/start', '/start-trip'], async (req, res) => {
   try {
     const { 
@@ -276,32 +261,28 @@ app.post(['/trips/start', '/start-trip'], async (req, res) => {
 
     const trip = result.rows[0];
 
-    // Ambil Rincian Nama AMT 1, AMT 2, dan Plat Nomor Secara Terpisah
+    // Ambil nama Driver 1, Driver 2, dan Plat secara paralel & serentak
     let amt1Name = 'Driver';
     let amt2Name = '-';
     let plateNo = '-';
 
     try {
-      if (amt1_id) {
-        const d1Res = await pool.query('SELECT name FROM drivers WHERE driver_id = $1', [parseInt(amt1_id)]);
-        if (d1Res.rows.length > 0) amt1Name = d1Res.rows[0].name;
-      }
-      if (amt2_id) {
-        const d2Res = await pool.query('SELECT name FROM drivers WHERE driver_id = $1', [parseInt(amt2_id)]);
-        if (d2Res.rows.length > 0) amt2Name = d2Res.rows[0].name;
-      }
-      if (vehicle_id) {
-        const vRes = await pool.query('SELECT plate_number FROM vehicles WHERE vehicle_id = $1', [parseInt(vehicle_id)]);
-        if (vRes.rows.length > 0) plateNo = vRes.rows[0].plate_number;
-      }
-    } catch (lookupErr) {
-      console.error('Error lookup names:', lookupErr.message);
+      const [d1Res, d2Res, vRes] = await Promise.all([
+        amt1_id ? pool.query('SELECT name FROM drivers WHERE driver_id = $1', [parseInt(amt1_id)]) : { rows: [] },
+        amt2_id ? pool.query('SELECT name FROM drivers WHERE driver_id = $1', [parseInt(amt2_id)]) : { rows: [] },
+        vehicle_id ? pool.query('SELECT plate_number FROM vehicles WHERE vehicle_id = $1', [parseInt(vehicle_id)]) : { rows: [] }
+      ]);
+
+      if (d1Res.rows.length > 0) amt1Name = d1Res.rows[0].name;
+      if (d2Res.rows.length > 0) amt2Name = d2Res.rows[0].name;
+      if (vRes.rows.length > 0) plateNo = vRes.rows[0].plate_number;
+    } catch (e) {
+      console.error('Error fast lookup:', e.message);
     }
 
-    // Kirim Notifikasi WhatsApp ke Grup
     if (start_gps) {
       const mapUrl = `https://www.google.com/maps?q=${start_gps}`;
-      const waMessage = 
+      sendWhatsAppNotification(
 `🚀 *E-LOGBOOK BAP: MULAI PERJALANAN*
 ----------------------------------------
 *AMT 1:* ${amt1Name}
@@ -313,9 +294,8 @@ app.post(['/trips/start', '/start-trip'], async (req, res) => {
 *Catatan:* ${notes || '-'}
 *Lokasi GPS:* ${mapUrl}
 ----------------------------------------
-_Status: Dalam Perjalanan (IN_PROGRESS)_`;
-
-      sendWhatsAppNotification(waMessage);
+_Status: Dalam Perjalanan (IN_PROGRESS)_`
+      );
     }
 
     res.json({ success: true, data: trip, trip: trip });
@@ -349,25 +329,20 @@ app.post(['/trips/end', '/end-trip'], async (req, res) => {
     let plateNo = '-';
 
     try {
-      if (trip.amt1_id) {
-        const d1Res = await pool.query('SELECT name FROM drivers WHERE driver_id = $1', [trip.amt1_id]);
-        if (d1Res.rows.length > 0) amt1Name = d1Res.rows[0].name;
-      }
-      if (trip.amt2_id) {
-        const d2Res = await pool.query('SELECT name FROM drivers WHERE driver_id = $1', [trip.amt2_id]);
-        if (d2Res.rows.length > 0) amt2Name = d2Res.rows[0].name;
-      }
-      if (trip.vehicle_id) {
-        const vRes = await pool.query('SELECT plate_number FROM vehicles WHERE vehicle_id = $1', [trip.vehicle_id]);
-        if (vRes.rows.length > 0) plateNo = vRes.rows[0].plate_number;
-      }
-    } catch (lookupErr) {
-      console.error('Error lookup names end trip:', lookupErr.message);
-    }
+      const [d1Res, d2Res, vRes] = await Promise.all([
+        trip.amt1_id ? pool.query('SELECT name FROM drivers WHERE driver_id = $1', [trip.amt1_id]) : { rows: [] },
+        trip.amt2_id ? pool.query('SELECT name FROM drivers WHERE driver_id = $1', [trip.amt2_id]) : { rows: [] },
+        trip.vehicle_id ? pool.query('SELECT plate_number FROM vehicles WHERE vehicle_id = $1', [trip.vehicle_id]) : { rows: [] }
+      ]);
+
+      if (d1Res.rows.length > 0) amt1Name = d1Res.rows[0].name;
+      if (d2Res.rows.length > 0) amt2Name = d2Res.rows[0].name;
+      if (vRes.rows.length > 0) plateNo = vRes.rows[0].plate_number;
+    } catch (e) {}
 
     if (end_gps) {
       const mapUrl = `https://www.google.com/maps?q=${end_gps}`;
-      const waMessage = 
+      sendWhatsAppNotification(
 `🛑 *E-LOGBOOK BAP: SELESAI PERJALANAN*
 ----------------------------------------
 *AMT 1:* ${amt1Name}
@@ -377,9 +352,8 @@ app.post(['/trips/end', '/end-trip'], async (req, res) => {
 *Catatan Tiba:* ${end_notes || '-'}
 *Lokasi Tiba:* ${mapUrl}
 ----------------------------------------
-_Status: Selesai (COMPLETED)_`;
-
-      sendWhatsAppNotification(waMessage);
+_Status: Selesai (COMPLETED)_`
+      );
     }
 
     res.json({ success: true, data: trip, trip: trip });
