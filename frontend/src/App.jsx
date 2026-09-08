@@ -190,28 +190,37 @@ export default function App() {
     reader.readAsDataURL(file);
   };
 
-  // LOGIN & RESTORE SESSION ACTIVE TRIP (FIXED ERROR DISPLAY)
+  // FUNGSI LOGIC LOGIN DENGAN PERBAIKAN FORMAT ERROR
   const handleLogin = async (e) => {
     e.preventDefault();
     try {
       const res = await axios.post(`${API_URL}/login`, loginForm);
-      if (res.data.success) {
+      if (res.data && res.data.success) {
         setUser(res.data);
         if (res.data.role === 'admin') {
           setActiveTab('reports');
           fetchReports();
         } else {
           setActiveTab('trip');
-          checkActiveTrip(res.data.user.driver_id);
+          if (res.data.user && res.data.user.driver_id) {
+            checkActiveTrip(res.data.user.driver_id);
+          }
         }
+      } else {
+        alert('Login gagal! Periksa kembali username dan password.');
       }
     } catch (err) {
-      // Menangani error agar teks dibaca dengan benar (String)
-      const errorMsg = err.response?.data?.error;
-      const messageToShow = typeof errorMsg === 'object' 
-        ? (errorMsg.message || JSON.stringify(errorMsg))
-        : (errorMsg || err.message || 'Login gagal! Periksa username/password.');
-        
+      let messageToShow = 'Login gagal! Periksa koneksi internet atau username/password.';
+      if (err.response && err.response.data) {
+        const errData = err.response.data.error;
+        if (typeof errData === 'string') {
+          messageToShow = errData;
+        } else if (typeof errData === 'object' && errData !== null) {
+          messageToShow = errData.message || JSON.stringify(errData);
+        }
+      } else if (err.message) {
+        messageToShow = err.message;
+      }
       alert(messageToShow);
     }
   };
@@ -221,7 +230,7 @@ export default function App() {
     axios.get(`${API_URL}/trips/active/${driverId}`)
       .then((res) => {
         if (res.data) {
-          setActiveTrip(res.data); // Kembalikan ke tampilan kuning "Status: SEDANG BERJALAN"
+          setActiveTrip(res.data);
         } else {
           setActiveTrip(null);
         }
@@ -280,7 +289,7 @@ export default function App() {
       setWatermarkedPhoto(null);
       alert('🚀 Perjalanan Resmi Dimulai! Selamat Jalan.');
     } catch (err) {
-      alert('Gagal memulai perjalanan: ' + err.message);
+      alert('Gagal memulai perjalanan: ' + (err.response?.data?.error || err.message));
     } finally {
       setLoading(false);
     }
@@ -304,7 +313,7 @@ export default function App() {
       setTripForm({ vehicle_id: '', amt2_id: '', destination_name: '', customer_name: '', fuel_type: 'Biosolar', fuel_volume: '', notes: '' });
       alert('🛑 Perjalanan Selesai! Logbook Tercatat.');
     } catch (err) {
-      alert('Gagal mengakhiri perjalanan: ' + err.message);
+      alert('Gagal mengakhiri perjalanan: ' + (err.response?.data?.error || err.message));
     } finally {
       setLoading(false);
     }
@@ -318,7 +327,7 @@ export default function App() {
         alert('Data perjalanan berhasil dihapus!');
         fetchReports();
       } catch (err) {
-        alert('Gagal menghapus data perjalanan: ' + err.message);
+        alert('Gagal menghapus data perjalanan: ' + (err.response?.data?.error || err.message));
       }
     }
   };
