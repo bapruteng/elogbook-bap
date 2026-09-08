@@ -10,7 +10,7 @@ app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
-// Middleware Otomatis Memotong Prefiks /api (Mencegah Error Cannot GET /api/...)
+// Middleware Otomatis Memotong Prefiks /api
 app.use((req, res, next) => {
   if (req.url.startsWith('/api')) {
     req.url = req.url.replace('/api', '') || '/';
@@ -125,7 +125,7 @@ app.get(['/drivers', '/master/drivers'], async (req, res) => {
   try {
     const result = await pool.query('SELECT * FROM drivers ORDER BY driver_id ASC');
     
-    // Normalisasi agar dibaca React (baik camelCase maupun snake_case)
+    // Normalisasi data lengkap (dinamakan seragam untuk React State)
     const formattedData = result.rows.map(driver => ({
       ...driver,
       id: driver.driver_id || driver.id,
@@ -138,10 +138,11 @@ app.get(['/drivers', '/master/drivers'], async (req, res) => {
       status: driver.status || 'ACTIVE'
     }));
 
-    res.json({ success: true, data: formattedData });
+    // Mengembalikan Array langsung
+    res.json(formattedData);
   } catch (err) {
     console.error('Get Drivers Error:', err.message);
-    res.status(500).json({ success: false, message: err.message });
+    res.status(500).json([]);
   }
 });
 
@@ -165,15 +166,17 @@ app.post(['/drivers', '/master/drivers'], async (req, res) => {
     );
 
     const newDriver = result.rows[0];
-    res.json({ 
-      success: true, 
-      data: {
-        ...newDriver,
-        id: newDriver.driver_id,
-        licenseId: newDriver.license_id,
-        pinCode: newDriver.pin_code
-      } 
-    });
+    const formattedNewDriver = {
+      ...newDriver,
+      id: newDriver.driver_id,
+      driver_id: newDriver.driver_id,
+      licenseId: newDriver.license_id,
+      license_id: newDriver.license_id,
+      pinCode: newDriver.pin_code,
+      pin_code: newDriver.pin_code
+    };
+
+    res.json({ success: true, data: formattedNewDriver });
   } catch (err) {
     console.error('Error insert driver:', err.message);
     res.status(500).json({ success: false, message: err.message });
@@ -208,10 +211,10 @@ app.get(['/trucks', '/master/trucks'], async (req, res) => {
       capacity: truck.capacity || 0
     }));
 
-    res.json({ success: true, data: formattedData });
+    res.json(formattedData);
   } catch (err) {
     console.error('Get Trucks Error:', err.message);
-    res.status(500).json({ success: false, message: err.message });
+    res.status(500).json([]);
   }
 });
 
@@ -235,7 +238,9 @@ app.post(['/trucks', '/master/trucks'], async (req, res) => {
       data: {
         ...newTruck,
         id: newTruck.truck_id,
-        plateNumber: newTruck.plate_number
+        truck_id: newTruck.truck_id,
+        plateNumber: newTruck.plate_number,
+        plate_number: newTruck.plate_number
       } 
     });
   } catch (err) {
@@ -269,18 +274,15 @@ app.get(['/destinations', '/master/destinations'], async (req, res) => {
       name: dest.name || ''
     }));
 
-    res.json({ success: true, data: formattedData });
+    res.json(formattedData);
   } catch (err) {
-    // Fallback default jika tabel belum tersedia
-    res.json({ 
-      success: true, 
-      data: [
-        { id: 1, name: 'SPBU Reo' },
-        { id: 2, name: 'SPBU Ruteng' },
-        { id: 3, name: 'Labuan Bajo' },
-        { id: 4, name: 'Borong' }
-      ] 
-    });
+    // Fallback array default jika tabel di Supabase belum dibuat
+    res.json([
+      { id: 1, name: 'SPBU Reo' },
+      { id: 2, name: 'SPBU Ruteng' },
+      { id: 3, name: 'Labuan Bajo' },
+      { id: 4, name: 'Borong' }
+    ]);
   }
 });
 
@@ -291,10 +293,10 @@ app.get(['/destinations', '/master/destinations'], async (req, res) => {
 app.get('/trips', async (req, res) => {
   try {
     const result = await pool.query('SELECT * FROM trips ORDER BY created_at DESC');
-    res.json({ success: true, data: result.rows });
+    res.json(result.rows);
   } catch (err) {
     console.error('Get Trips Error:', err.message);
-    res.status(500).json({ success: false, message: err.message });
+    res.status(500).json([]);
   }
 });
 
