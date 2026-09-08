@@ -77,12 +77,12 @@ export default function App() {
     };
   }, []);
 
-  // FUNGSI FETCH MASTER DATA (REVISI: Ambil dari 3 endpoint terpisah)
+  // FUNGSI FETCH MASTER DATA (Sinkron dengan vehicles/trucks/drivers/destinations)
   const fetchMasterData = async () => {
     try {
       const [resDrivers, resTrucks, resDestinations] = await Promise.all([
         axios.get(`${API_URL}/drivers`),
-        axios.get(`${API_URL}/trucks`),
+        axios.get(`${API_URL}/vehicles`).catch(() => axios.get(`${API_URL}/trucks`)),
         axios.get(`${API_URL}/destinations`)
       ]);
 
@@ -90,10 +90,10 @@ export default function App() {
       const trucksData = Array.isArray(resTrucks.data) ? resTrucks.data : (resTrucks.data.data || []);
       const destsData = Array.isArray(resDestinations.data) ? resDestinations.data : (resDestinations.data.data || []);
 
-      // Format Trucks agar kompatibel dengan 'vehicles' di Frontend
+      // Format Armada
       const formattedVehicles = trucksData.map(t => ({
         ...t,
-        vehicle_id: t.truck_id || t.id,
+        vehicle_id: t.vehicle_id || t.truck_id || t.id,
         plate_number: t.plate_number || t.plateNumber || '',
         brand: t.brand || 'Mitsubishi',
         capacity: t.capacity || 8,
@@ -210,7 +210,7 @@ export default function App() {
     doc.save(`Laporan_BAP_${new Date().toISOString().slice(0,10)}.pdf`);
   };
 
-  // WATERMARK FOTO AUTOMATIC
+  // WATERMARK FOTO AUTOMATIC (REVISI KOMPRESI MAX 800PX & KUALITAS 0.6 UNTUK CEGAH ERROR 500)
   const handlePhotoCapture = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -225,28 +225,32 @@ export default function App() {
       img.onload = () => {
         const canvas = document.createElement('canvas');
         const ctx = canvas.getContext('2d');
-        canvas.width = img.width;
-        canvas.height = img.height;
 
-        ctx.drawImage(img, 0, 0);
+        // Batasi resolusi maksimal gambar agar ringan dikirim
+        const maxWidth = 800;
+        const scale = maxWidth / img.width;
+        canvas.width = maxWidth;
+        canvas.height = img.height * scale;
 
-        const bannerHeight = img.height * 0.12;
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+
+        const bannerHeight = canvas.height * 0.14;
         ctx.fillStyle = 'rgba(0, 0, 0, 0.65)';
-        ctx.fillRect(0, img.height - bannerHeight, img.width, bannerHeight);
+        ctx.fillRect(0, canvas.height - bannerHeight, canvas.width, bannerHeight);
 
-        const fontSize = Math.floor(img.width * 0.035);
+        const fontSize = Math.floor(canvas.width * 0.035);
         ctx.font = `bold ${fontSize}px Arial`;
         ctx.fillStyle = '#ffffff';
 
-        const padding = img.width * 0.03;
-        const startY = img.height - bannerHeight + (fontSize * 1.2);
+        const padding = canvas.width * 0.03;
+        const startY = canvas.height - bannerHeight + (fontSize * 1.2);
 
         ctx.fillText(`PT BINTANG AGUNG PRIMA - LOGBOOK`, padding, startY);
         ctx.fillStyle = '#ffc107';
         ctx.fillText(`📍 GPS: ${gps}`, padding, startY + (fontSize * 1.2));
         ctx.fillText(`⏰ ${timeStr}`, padding, startY + (fontSize * 2.4));
 
-        setWatermarkedPhoto(canvas.toDataURL('image/jpeg', 0.8));
+        setWatermarkedPhoto(canvas.toDataURL('image/jpeg', 0.6));
         setLoading(false);
       };
       img.src = event.target.result;
@@ -313,12 +317,12 @@ export default function App() {
   const getGPS = () => {
     return new Promise((resolve) => {
       if (!navigator.geolocation) {
-        resolve('-8.635,120.471');
+        resolve('-8.601151,120.468152');
         return;
       }
       navigator.geolocation.getCurrentPosition(
         (pos) => resolve(`${pos.coords.latitude.toFixed(6)},${pos.coords.longitude.toFixed(6)}`),
-        () => resolve('-8.635,120.471'),
+        () => resolve('-8.601151,120.468152'),
         { timeout: 5000 }
       );
     });
@@ -337,12 +341,14 @@ export default function App() {
       driver_name: user.user.name,
       plate_number: selectedVehicle ? selectedVehicle.plate_number : '',
       fuel_type: tripForm.fuel_type,
-      volume: tripForm.fuel_volume,
+      fuel_volume: tripForm.fuel_volume || (selectedVehicle ? selectedVehicle.capacity : 8),
       destination: tripForm.destination_name,
       notes: tripForm.notes,
+      start_gps: gps,
       latitude: gps.split(',')[0],
       longitude: gps.split(',')[1],
-      photo_url: watermarkedPhoto
+      photo_url: watermarkedPhoto,
+      photo_base64: watermarkedPhoto
     };
 
     if (isOffline) {
@@ -356,7 +362,7 @@ export default function App() {
 
     try {
       const res = await axios.post(`${API_URL}/trips/start`, payload);
-      const tripData = res.data.data || res.data;
+      const tripData = res.data.data || res.data.trip || res.data;
       setActiveTrip({
         trip_id: tripData.trip_id || tripData.id,
         destination_name: tripForm.destination_name,
@@ -379,9 +385,11 @@ export default function App() {
     try {
       await axios.post(`${API_URL}/trips/end`, {
         trip_id: activeTrip.trip_id,
+        end_gps: gps,
         latitude: gps.split(',')[0],
         longitude: gps.split(',')[1],
         photo_url: watermarkedPhoto,
+        photo_base64: watermarkedPhoto,
         end_notes: endNotes
       });
       setActiveTrip(null);
@@ -435,7 +443,7 @@ export default function App() {
   const handleSaveVehicle = async (e) => {
     e.preventDefault();
     try {
-      await axios.post(`${API_URL}/trucks`, newVehicle);
+      await axios.post(`${API_URL}/vehicles`, newVehicle);
       alert('Armada berhasil ditambahkan!');
       setNewVehicle({ plate_number: '', brand: '', capacity: '', compartment: '' });
       setEditingVehicleId(null);
@@ -455,7 +463,7 @@ export default function App() {
 
   const handleDeleteVehicle = async (id) => {
     if (window.confirm('Yakin ingin menghapus armada ini?')) {
-      await axios.delete(`${API_URL}/trucks/${id}`);
+      await axios.delete(`${API_URL}/vehicles/${id}`);
       fetchMasterData();
     }
   };
