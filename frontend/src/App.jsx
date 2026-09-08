@@ -190,7 +190,7 @@ export default function App() {
     reader.readAsDataURL(file);
   };
 
-  // LOGIN & LOGOUT
+  // LOGIN & RESTORE SESSION ACTIVE TRIP
   const handleLogin = async (e) => {
     e.preventDefault();
     try {
@@ -202,12 +202,27 @@ export default function App() {
           fetchReports();
         } else {
           setActiveTab('trip');
+          // OTOMATIS CEK APAKAH DRIVER MASIH MEMILIKI TRIP AKTIF (IN_PROGRESS)
+          checkActiveTrip(res.data.user.driver_id);
         }
       }
     } catch (err) {
       const msg = err.response?.data?.error || err.message || 'Login gagal!';
       alert(msg);
     }
+  };
+
+  // FUNGSI MEMULIHKAN PERJALANAN AKTIF DRIVER
+  const checkActiveTrip = (driverId) => {
+    axios.get(`${API_URL}/trips/active/${driverId}`)
+      .then((res) => {
+        if (res.data) {
+          setActiveTrip(res.data); // Kembalikan ke tampilan kuning "Status: SEDANG BERJALAN"
+        } else {
+          setActiveTrip(null);
+        }
+      })
+      .catch((err) => console.error('Gagal memuat trip aktif:', err));
   };
 
   const handleLogout = () => {
@@ -246,7 +261,6 @@ export default function App() {
       photo_base64: watermarkedPhoto
     };
 
-    // JIKA OFFLINE Simpan ke LocalStorage
     if (isOffline) {
       localStorage.setItem('pending_offline_trip', JSON.stringify(payload));
       setActiveTrip({ destination_name: tripForm.destination_name, fuel_type: tripForm.fuel_type, fuel_volume: tripForm.fuel_volume });
