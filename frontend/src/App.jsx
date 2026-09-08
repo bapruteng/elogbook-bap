@@ -77,15 +77,79 @@ export default function App() {
     };
   }, []);
 
-  const fetchMasterData = () => {
-    axios.get(`${API_URL}/master-data`)
-      .then((res) => setMaster(res.data))
-      .catch((err) => console.error('Gagal mengambil master data:', err));
+  // FUNGSI FETCH MASTER DATA (REVISI: Ambil dari 3 endpoint terpisah)
+  const fetchMasterData = async () => {
+    try {
+      const [resDrivers, resTrucks, resDestinations] = await Promise.all([
+        axios.get(`${API_URL}/drivers`),
+        axios.get(`${API_URL}/trucks`),
+        axios.get(`${API_URL}/destinations`)
+      ]);
+
+      const driversData = Array.isArray(resDrivers.data) ? resDrivers.data : (resDrivers.data.data || []);
+      const trucksData = Array.isArray(resTrucks.data) ? resTrucks.data : (resTrucks.data.data || []);
+      const destsData = Array.isArray(resDestinations.data) ? resDestinations.data : (resDestinations.data.data || []);
+
+      // Format Trucks agar kompatibel dengan 'vehicles' di Frontend
+      const formattedVehicles = trucksData.map(t => ({
+        ...t,
+        vehicle_id: t.truck_id || t.id,
+        plate_number: t.plate_number || t.plateNumber || '',
+        brand: t.brand || 'Mitsubishi',
+        capacity: t.capacity || 8,
+        compartment: t.compartment || `${t.capacity || 8} KL`
+      }));
+
+      // Format Drivers
+      const formattedDrivers = driversData.map(d => ({
+        ...d,
+        driver_id: d.driver_id || d.id,
+        name: d.name || '',
+        username: d.username || ''
+      }));
+
+      // Format Destinations
+      const formattedDestinations = destsData.map(dst => ({
+        ...dst,
+        destination_id: dst.destination_id || dst.id,
+        location_name: dst.location_name || dst.name || ''
+      }));
+
+      setMaster({
+        drivers: formattedDrivers,
+        vehicles: formattedVehicles,
+        destinations: formattedDestinations
+      });
+    } catch (err) {
+      console.error('Gagal mengambil master data:', err);
+    }
   };
 
   const fetchReports = () => {
-    axios.get(`${API_URL}/reports`, { params: filters })
-      .then((res) => setReports(res.data))
+    axios.get(`${API_URL}/trips`, { params: filters })
+      .then((res) => {
+        const rawData = Array.isArray(res.data) ? res.data : (res.data.data || []);
+        const formattedReports = rawData.map(r => ({
+          ...r,
+          trip_id: r.trip_id || r.id,
+          plate_number: r.plate_number || '-',
+          amt1_name: r.driver_name || r.amt1_name || 'Driver',
+          amt2_name: r.amt2_name || '',
+          destination_name: r.destination || r.destination_name || '-',
+          customer_name: r.customer_name || r.destination || '-',
+          fuel_type: r.fuel_type || 'Biosolar',
+          fuel_volume: r.volume || r.fuel_volume || 0,
+          start_time: r.start_time || r.created_at,
+          end_time: r.end_time,
+          start_gps: r.start_lat ? `${r.start_lat},${r.start_lng}` : r.start_gps,
+          end_gps: r.end_lat ? `${r.end_lat},${r.end_lng}` : r.end_gps,
+          start_photo: r.start_photo,
+          end_photo: r.end_photo,
+          notes: r.notes || r.end_notes || '-',
+          status: r.status || 'IN_PROGRESS'
+        }));
+        setReports(formattedReports);
+      })
       .catch((err) => console.error('Gagal mengambil data laporan:', err));
   };
 
@@ -96,7 +160,7 @@ export default function App() {
 
   const resetFilters = () => {
     setFilters({ start_date: '', end_date: '', vehicle_id: '' });
-    axios.get(`${API_URL}/reports`).then((res) => setReports(res.data));
+    fetchReports();
   };
 
   // EXPORT EXCEL
@@ -110,7 +174,7 @@ export default function App() {
       'Konsumen / SPBU': r.customer_name || '-',
       'Jenis BBM': r.fuel_type || '-',
       'Volume (KL)': r.fuel_volume || 0,
-      'Waktu Berangkat': new Date(r.start_time).toLocaleString('id-ID'),
+      'Waktu Berangkat': r.start_time ? new Date(r.start_time).toLocaleString('id-ID') : '-',
       'Waktu Tiba': r.end_time ? new Date(r.end_time).toLocaleString('id-ID') : '-',
       'Catatan / Kendala': r.notes || '-',
       'Status': r.status
@@ -137,7 +201,7 @@ export default function App() {
       `${r.destination_name}\n(${r.customer_name || '-'})`,
       r.fuel_type || '-',
       r.fuel_volume || 0,
-      new Date(r.start_time).toLocaleString('id-ID'),
+      r.start_time ? new Date(r.start_time).toLocaleString('id-ID') : '-',
       r.notes || '-',
       r.status
     ]);
@@ -190,7 +254,7 @@ export default function App() {
     reader.readAsDataURL(file);
   };
 
-  // FUNGSI LOGIC LOGIN DENGAN PERBAIKAN FORMAT ERROR
+  // FUNGSI LOGIN
   const handleLogin = async (e) => {
     e.preventDefault();
     try {
@@ -202,8 +266,8 @@ export default function App() {
           fetchReports();
         } else {
           setActiveTab('trip');
-          if (res.data.user && res.data.user.driver_id) {
-            checkActiveTrip(res.data.user.driver_id);
+          if (res.data.user && (res.data.user.driver_id || res.data.user.id)) {
+            checkActiveTrip(res.data.user.driver_id || res.data.user.id);
           }
         }
       } else {
@@ -212,25 +276,27 @@ export default function App() {
     } catch (err) {
       let messageToShow = 'Login gagal! Periksa koneksi internet atau username/password.';
       if (err.response && err.response.data) {
-        const errData = err.response.data.error;
+        const errData = err.response.data.message || err.response.data.error;
         if (typeof errData === 'string') {
           messageToShow = errData;
-        } else if (typeof errData === 'object' && errData !== null) {
-          messageToShow = errData.message || JSON.stringify(errData);
         }
-      } else if (err.message) {
-        messageToShow = err.message;
       }
       alert(messageToShow);
     }
   };
 
-  // FUNGSI MEMULIHKAN PERJALANAN AKTIF DRIVER
   const checkActiveTrip = (driverId) => {
-    axios.get(`${API_URL}/trips/active/${driverId}`)
+    axios.get(`${API_URL}/trips`)
       .then((res) => {
-        if (res.data) {
-          setActiveTrip(res.data);
+        const rawData = Array.isArray(res.data) ? res.data : (res.data.data || []);
+        const active = rawData.find(t => t.status === 'IN_PROGRESS');
+        if (active) {
+          setActiveTrip({
+            trip_id: active.trip_id || active.id,
+            destination_name: active.destination || active.destination_name,
+            fuel_type: active.fuel_type,
+            fuel_volume: active.volume || active.fuel_volume
+          });
         } else {
           setActiveTrip(null);
         }
@@ -244,7 +310,6 @@ export default function App() {
     setActiveTrip(null);
   };
 
-  // LOGBOOK AMT (DENGAN SUPPORT OFFLINE DRAFT)
   const getGPS = () => {
     return new Promise((resolve) => {
       if (!navigator.geolocation) {
@@ -266,12 +331,18 @@ export default function App() {
 
     setLoading(true);
     const gps = await getGPS();
+    const selectedVehicle = master.vehicles.find(v => v.vehicle_id === parseInt(tripForm.vehicle_id));
 
     const payload = {
-      ...tripForm,
-      amt1_id: user.user.driver_id,
-      start_gps: gps,
-      photo_base64: watermarkedPhoto
+      driver_name: user.user.name,
+      plate_number: selectedVehicle ? selectedVehicle.plate_number : '',
+      fuel_type: tripForm.fuel_type,
+      volume: tripForm.fuel_volume,
+      destination: tripForm.destination_name,
+      notes: tripForm.notes,
+      latitude: gps.split(',')[0],
+      longitude: gps.split(',')[1],
+      photo_url: watermarkedPhoto
     };
 
     if (isOffline) {
@@ -285,11 +356,17 @@ export default function App() {
 
     try {
       const res = await axios.post(`${API_URL}/trips/start`, payload);
-      setActiveTrip(res.data.trip);
+      const tripData = res.data.data || res.data;
+      setActiveTrip({
+        trip_id: tripData.trip_id || tripData.id,
+        destination_name: tripForm.destination_name,
+        fuel_type: tripForm.fuel_type,
+        fuel_volume: tripForm.fuel_volume
+      });
       setWatermarkedPhoto(null);
       alert('🚀 Perjalanan Resmi Dimulai! Selamat Jalan.');
     } catch (err) {
-      alert('Gagal memulai perjalanan: ' + (err.response?.data?.error || err.message));
+      alert('Gagal memulai perjalanan: ' + (err.response?.data?.message || err.message));
     } finally {
       setLoading(false);
     }
@@ -302,10 +379,10 @@ export default function App() {
     try {
       await axios.post(`${API_URL}/trips/end`, {
         trip_id: activeTrip.trip_id,
-        vehicle_id: activeTrip.vehicle_id,
-        end_gps: gps,
-        photo_base64: watermarkedPhoto,
-        notes: endNotes
+        latitude: gps.split(',')[0],
+        longitude: gps.split(',')[1],
+        photo_url: watermarkedPhoto,
+        end_notes: endNotes
       });
       setActiveTrip(null);
       setWatermarkedPhoto(null);
@@ -313,21 +390,20 @@ export default function App() {
       setTripForm({ vehicle_id: '', amt2_id: '', destination_name: '', customer_name: '', fuel_type: 'Biosolar', fuel_volume: '', notes: '' });
       alert('🛑 Perjalanan Selesai! Logbook Tercatat.');
     } catch (err) {
-      alert('Gagal mengakhiri perjalanan: ' + (err.response?.data?.error || err.message));
+      alert('Gagal mengakhiri perjalanan: ' + (err.response?.data?.message || err.message));
     } finally {
       setLoading(false);
     }
   };
 
-  // HAPUS TRIP ADMIN
   const handleDeleteTrip = async (tripId) => {
-    if (window.confirm(`Yakin ingin menghapus data perjalanan #${tripId}? Status armada terkait akan otomatis dipulihkan.`)) {
+    if (window.confirm(`Yakin ingin menghapus data perjalanan #${tripId}?`)) {
       try {
         await axios.delete(`${API_URL}/trips/${tripId}`);
         alert('Data perjalanan berhasil dihapus!');
         fetchReports();
       } catch (err) {
-        alert('Gagal menghapus data perjalanan: ' + (err.response?.data?.error || err.message));
+        alert('Gagal menghapus data perjalanan: ' + (err.response?.data?.message || err.message));
       }
     }
   };
@@ -336,13 +412,8 @@ export default function App() {
   const handleSaveDriver = async (e) => {
     e.preventDefault();
     try {
-      if (editingDriverId) {
-        await axios.put(`${API_URL}/master/drivers/${editingDriverId}`, newDriver);
-        alert('Data Driver AMT berhasil diperbarui!');
-      } else {
-        await axios.post(`${API_URL}/master/drivers`, newDriver);
-        alert('Driver AMT berhasil ditambahkan!');
-      }
+      await axios.post(`${API_URL}/drivers`, newDriver);
+      alert('Driver AMT berhasil ditambahkan!');
       setNewDriver({ name: '', username: '', password: '' });
       setEditingDriverId(null);
       fetchMasterData();
@@ -356,7 +427,7 @@ export default function App() {
 
   const handleDeleteDriver = async (id) => {
     if (window.confirm('Yakin ingin menghapus driver ini?')) {
-      await axios.delete(`${API_URL}/master/drivers/${id}`);
+      await axios.delete(`${API_URL}/drivers/${id}`);
       fetchMasterData();
     }
   };
@@ -364,13 +435,8 @@ export default function App() {
   const handleSaveVehicle = async (e) => {
     e.preventDefault();
     try {
-      if (editingVehicleId) {
-        await axios.put(`${API_URL}/master/vehicles/${editingVehicleId}`, newVehicle);
-        alert('Data Armada berhasil diperbarui!');
-      } else {
-        await axios.post(`${API_URL}/master/vehicles`, newVehicle);
-        alert('Armada berhasil ditambahkan!');
-      }
+      await axios.post(`${API_URL}/trucks`, newVehicle);
+      alert('Armada berhasil ditambahkan!');
       setNewVehicle({ plate_number: '', brand: '', capacity: '', compartment: '' });
       setEditingVehicleId(null);
       fetchMasterData();
@@ -389,7 +455,7 @@ export default function App() {
 
   const handleDeleteVehicle = async (id) => {
     if (window.confirm('Yakin ingin menghapus armada ini?')) {
-      await axios.delete(`${API_URL}/master/vehicles/${id}`);
+      await axios.delete(`${API_URL}/trucks/${id}`);
       fetchMasterData();
     }
   };
@@ -397,13 +463,8 @@ export default function App() {
   const handleSaveDestination = async (e) => {
     e.preventDefault();
     try {
-      if (editingDestinationId) {
-        await axios.put(`${API_URL}/master/destinations/${editingDestinationId}`, newDestination);
-        alert('Data Lokasi berhasil diperbarui!');
-      } else {
-        await axios.post(`${API_URL}/master/destinations`, newDestination);
-        alert('Lokasi tujuan berhasil ditambahkan!');
-      }
+      await axios.post(`${API_URL}/destinations`, newDestination);
+      alert('Lokasi tujuan berhasil ditambahkan!');
       setNewDestination({ location_name: '' });
       setEditingDestinationId(null);
       fetchMasterData();
@@ -417,7 +478,7 @@ export default function App() {
 
   const handleDeleteDestination = async (id) => {
     if (window.confirm('Yakin ingin menghapus lokasi ini?')) {
-      await axios.delete(`${API_URL}/master/destinations/${id}`);
+      await axios.delete(`${API_URL}/destinations/${id}`);
       fetchMasterData();
     }
   };
@@ -465,7 +526,6 @@ export default function App() {
         <button onClick={handleLogout} style={styles.logoutBtn}>Keluar 🚪</button>
       </div>
 
-      {/* BANNER INDICATOR OFFLINE */}
       {isOffline && (
         <div style={{ backgroundColor: '#dc3545', color: '#fff', textAlign: 'center', padding: '8px', fontSize: '13px', fontWeight: 'bold' }}>
           ⚠️ Anda sedang Offline (Sinyal Hilang). Input logbook akan disimpan sementara sebagai Draft Lokal.
@@ -584,7 +644,6 @@ export default function App() {
         <div style={styles.adminWrapper}>
           {activeTab === 'reports' && (
             <div>
-              {/* STATISTIC CARDS */}
               <div style={styles.statsGrid}>
                 <div style={{ ...styles.statCard, borderLeft: '5px solid #ffc107' }}>
                   <small>Armada Beroperasi</small>
@@ -600,7 +659,6 @@ export default function App() {
                 </div>
               </div>
 
-              {/* PANEL FILTER REKAP */}
               <div style={styles.filterBox}>
                 <form onSubmit={handleFilterSubmit} style={{ display: 'flex', gap: '10px', alignItems: 'flex-end', flexWrap: 'wrap' }}>
                   <div>
@@ -654,7 +712,7 @@ export default function App() {
                       </td>
                       <td><strong>{r.fuel_volume || 0} KL</strong><br/><small>{r.fuel_type}</small></td>
                       <td>
-                        <small>🛫 {new Date(r.start_time).toLocaleString('id-ID')}</small><br/>
+                        <small>🛫 {r.start_time ? new Date(r.start_time).toLocaleString('id-ID') : '-'}</small><br/>
                         {r.start_gps && <a href={`https://maps.google.com/?q=${r.start_gps}`} target="_blank" rel="noreferrer" style={styles.mapLink}>📍 Maps Berangkat</a>}<br/>
                         <small>🛬 {r.end_time ? new Date(r.end_time).toLocaleString('id-ID') : '-'}</small><br/>
                         {r.end_gps && <a href={`https://maps.google.com/?q=${r.end_gps}`} target="_blank" rel="noreferrer" style={styles.mapLink}>📍 Maps Tiba</a>}
@@ -675,7 +733,6 @@ export default function App() {
             </div>
           )}
 
-          {/* TAB MASTER DATA */}
           {activeTab === 'master_drivers' && (
             <div>
               <h3>MANAJEMEN MASTER AMT (SOPIR)</h3>
@@ -785,7 +842,6 @@ export default function App() {
         </div>
       )}
 
-      {/* MODAL POPUP PREVIEW FOTO */}
       {selectedPhoto && (
         <div style={styles.modalOverlay} onClick={() => setSelectedPhoto(null)}>
           <div style={styles.modalContent} onClick={(e) => e.stopPropagation()}>
