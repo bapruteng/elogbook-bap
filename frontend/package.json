@@ -9,12 +9,17 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "axios": "^1.6.8",
-    "react": "^18.2.0",
-    "react-dom": "^18.2.0"
+    "axios": "^1.7.2",
+    "jspdf": "^2.5.1",
+    "jspdf-autotable": "^3.8.2",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
-    "@vitejs/plugin-react": "^4.2.1",
-    "vite": "^5.2.8"
+    "@types/react": "^18.3.3",
+    "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-react": "^4.3.1",
+    "vite": "^5.3.1"
   }
 }
