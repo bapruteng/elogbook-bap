@@ -10,7 +10,7 @@ app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
-// Middleware Otomatis Memotong Prefiks /api
+// Middleware Otomatis Memotong Prefiks /api (Mencegah Error Routing Vercel)
 app.use((req, res, next) => {
   if (req.url.startsWith('/api')) {
     req.url = req.url.replace('/api', '') || '/';
@@ -102,6 +102,7 @@ app.post(['/login', '/auth/login'], async (req, res) => {
         role: 'driver',
         user: { 
           id: driver.driver_id || driver.id, 
+          driver_id: driver.driver_id || driver.id,
           name: driver.name, 
           username: driver.username,
           license_id: driver.license_id,
@@ -125,7 +126,6 @@ app.get(['/drivers', '/master/drivers'], async (req, res) => {
   try {
     const result = await pool.query('SELECT * FROM drivers ORDER BY driver_id ASC');
     
-    // Normalisasi data lengkap (dinamakan seragam untuk React State)
     const formattedData = result.rows.map(driver => ({
       ...driver,
       id: driver.driver_id || driver.id,
@@ -138,11 +138,10 @@ app.get(['/drivers', '/master/drivers'], async (req, res) => {
       status: driver.status || 'ACTIVE'
     }));
 
-    // Mengembalikan Array langsung
     res.json(formattedData);
   } catch (err) {
     console.error('Get Drivers Error:', err.message);
-    res.status(500).json([]);
+    res.json([]);
   }
 });
 
@@ -166,17 +165,16 @@ app.post(['/drivers', '/master/drivers'], async (req, res) => {
     );
 
     const newDriver = result.rows[0];
-    const formattedNewDriver = {
-      ...newDriver,
-      id: newDriver.driver_id,
-      driver_id: newDriver.driver_id,
-      licenseId: newDriver.license_id,
-      license_id: newDriver.license_id,
-      pinCode: newDriver.pin_code,
-      pin_code: newDriver.pin_code
-    };
-
-    res.json({ success: true, data: formattedNewDriver });
+    res.json({ 
+      success: true, 
+      data: {
+        ...newDriver,
+        id: newDriver.driver_id,
+        driver_id: newDriver.driver_id,
+        licenseId: newDriver.license_id,
+        pinCode: newDriver.pin_code
+      } 
+    });
   } catch (err) {
     console.error('Error insert driver:', err.message);
     res.status(500).json({ success: false, message: err.message });
@@ -208,28 +206,36 @@ app.get(['/trucks', '/master/trucks'], async (req, res) => {
       truck_id: truck.truck_id || truck.id,
       plateNumber: truck.plate_number || truck.plateNumber || '',
       plate_number: truck.plate_number || truck.plateNumber || '',
-      capacity: truck.capacity || 0
+      brand: truck.brand || 'Mitsubishi',
+      capacity: truck.capacity || 8,
+      compartment: truck.compartment || `${truck.capacity || 8} KL`
     }));
 
     res.json(formattedData);
   } catch (err) {
     console.error('Get Trucks Error:', err.message);
-    res.status(500).json([]);
+    // Fallback armada dasar
+    res.json([
+      { id: 1, truck_id: 1, plate_number: 'EB 8547 EB', brand: 'Mitsubishi', capacity: 8, compartment: '8 KL' }
+    ]);
   }
 });
 
 app.post(['/trucks', '/master/trucks'], async (req, res) => {
-  const { plate_number, plateNumber, capacity } = req.body;
+  const { plate_number, plateNumber, brand, capacity, compartment } = req.body;
   const finalPlate = plate_number || plateNumber;
+  const finalBrand = brand || 'Mitsubishi';
+  const finalCapacity = capacity || 8;
+  const finalCompartment = compartment || `${finalCapacity} KL`;
 
-  if (!finalPlate || !capacity) {
-    return res.status(400).json({ success: false, message: 'Plat nomor dan kapasitas wajib diisi' });
+  if (!finalPlate) {
+    return res.status(400).json({ success: false, message: 'Plat nomor wajib diisi' });
   }
 
   try {
     const result = await pool.query(
-      'INSERT INTO trucks (plate_number, capacity) VALUES ($1, $2) RETURNING *',
-      [finalPlate, capacity]
+      'INSERT INTO trucks (plate_number, brand, capacity, compartment) VALUES ($1, $2, $3, $4) RETURNING *',
+      [finalPlate, finalBrand, finalCapacity, finalCompartment]
     );
 
     const newTruck = result.rows[0];
@@ -266,37 +272,105 @@ app.delete(['/trucks/:id', '/master/trucks/:id'], async (req, res) => {
 
 app.get(['/destinations', '/master/destinations'], async (req, res) => {
   try {
-    const result = await pool.query('SELECT * FROM destinations ORDER BY name ASC');
+    const result = await pool.query('SELECT * FROM destinations ORDER BY destination_id ASC');
     
     const formattedData = result.rows.map(dest => ({
       ...dest,
       id: dest.destination_id || dest.id,
-      name: dest.name || ''
+      destination_id: dest.destination_id || dest.id,
+      location_name: dest.location_name || dest.name || '',
+      name: dest.location_name || dest.name || ''
     }));
 
     res.json(formattedData);
   } catch (err) {
-    // Fallback array default jika tabel di Supabase belum dibuat
+    console.error('Get Destinations Error:', err.message);
     res.json([
-      { id: 1, name: 'SPBU Reo' },
-      { id: 2, name: 'SPBU Ruteng' },
-      { id: 3, name: 'Labuan Bajo' },
-      { id: 4, name: 'Borong' }
+      { id: 1, destination_id: 1, location_name: 'SPBU Reo', name: 'SPBU Reo' },
+      { id: 2, destination_id: 2, location_name: 'SPBU Ruteng', name: 'SPBU Ruteng' },
+      { id: 3, destination_id: 3, location_name: 'Labuan Bajo', name: 'Labuan Bajo' },
+      { id: 4, destination_id: 4, location_name: 'Borong', name: 'Borong' }
     ]);
   }
 });
 
+app.post(['/destinations', '/master/destinations'], async (req, res) => {
+  const { location_name, name } = req.body;
+  const finalLocation = location_name || name;
+
+  if (!finalLocation) {
+    return res.status(400).json({ success: false, message: 'Nama lokasi tujuan wajib diisi' });
+  }
+
+  try {
+    const result = await pool.query(
+      'INSERT INTO destinations (location_name) VALUES ($1) RETURNING *',
+      [finalLocation]
+    );
+
+    const newDest = result.rows[0];
+    res.json({ 
+      success: true, 
+      data: {
+        ...newDest,
+        id: newDest.destination_id,
+        destination_id: newDest.destination_id,
+        location_name: newDest.location_name
+      } 
+    });
+  } catch (err) {
+    console.error('Error insert destination:', err.message);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+app.delete(['/destinations/:id', '/master/destinations/:id'], async (req, res) => {
+  const { id } = req.params;
+  try {
+    await pool.query('DELETE FROM destinations WHERE destination_id = $1 OR id = $1', [id]);
+    res.json({ success: true, message: 'Lokasi tujuan berhasil dihapus' });
+  } catch (err) {
+    console.error('Delete Destination Error:', err.message);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
 // =================================================================
-// 5. TRIPS & LOGBOOK MANAGEMENT
+// 5. TRIPS & LOGBOOK MANAGEMENT (FILTER TANGGAL & ARMADA SAFE)
 // =================================================================
 
-app.get('/trips', async (req, res) => {
+app.get(['/trips', '/reports'], async (req, res) => {
   try {
-    const result = await pool.query('SELECT * FROM trips ORDER BY created_at DESC');
+    const { start_date, end_date, vehicle_id } = req.query;
+
+    let queryText = 'SELECT * FROM trips WHERE 1=1';
+    const queryParams = [];
+
+    // Filter Tanggal Mulai
+    if (start_date && typeof start_date === 'string' && start_date.trim() !== '') {
+      queryParams.push(start_date.trim());
+      queryText += ` AND start_time >= $${queryParams.length}::timestamp`;
+    }
+
+    // Filter Tanggal Akhir
+    if (end_date && typeof end_date === 'string' && end_date.trim() !== '') {
+      queryParams.push(`${end_date.trim()} 23:59:59`);
+      queryText += ` AND start_time <= $${queryParams.length}::timestamp`;
+    }
+
+    // Filter Armada
+    if (vehicle_id && typeof vehicle_id === 'string' && vehicle_id.trim() !== '') {
+      queryParams.push(vehicle_id.trim());
+      queryText += ` AND (plate_number = $${queryParams.length} OR CAST(vehicle_id AS VARCHAR) = $${queryParams.length})`;
+    }
+
+    queryText += ' ORDER BY trip_id DESC';
+
+    const result = await pool.query(queryText, queryParams);
     res.json(result.rows);
   } catch (err) {
     console.error('Get Trips Error:', err.message);
-    res.status(500).json([]);
+    res.json([]);
   }
 });
 
@@ -305,7 +379,7 @@ app.post('/trips/start', async (req, res) => {
 
   const finalDriver = driver_name || driverName;
   const finalPlate = plate_number || plateNumber;
-  const finalFuel = fuel_type || fuelType;
+  const finalFuel = fuel_type || fuelType || 'Biosolar';
   const finalPhoto = photo_url || photoUrl;
 
   try {
@@ -314,7 +388,7 @@ app.post('/trips/start', async (req, res) => {
        (driver_name, plate_number, fuel_type, volume, destination, notes, start_lat, start_lng, start_photo, status, start_time) 
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'IN_PROGRESS', NOW()) 
        RETURNING *`,
-      [finalDriver, finalPlate, finalFuel, volume, destination, notes, latitude, longitude, finalPhoto]
+      [finalDriver, finalPlate, finalFuel, volume || 8, destination, notes, latitude, longitude, finalPhoto]
     );
 
     const trip = result.rows[0];
@@ -325,7 +399,7 @@ app.post('/trips/start', async (req, res) => {
 ----------------------------------------
 *Driver/AMT:* ${finalDriver}
 *Armada:* ${finalPlate}
-*Muatan:* ${finalFuel} (${volume} KL)
+*Muatan:* ${finalFuel} (${volume || 8} KL)
 *Tujuan:* ${destination}
 *Catatan:* ${notes || '-'}
 *Lokasi GPS:* ${mapUrl}
@@ -380,6 +454,17 @@ _Status: Selesai (COMPLETED)_`;
     res.json({ success: true, data: trip });
   } catch (err) {
     console.error('End Trip Error:', err.message);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+app.delete('/trips/:id', async (req, res) => {
+  const { id } = req.params;
+  try {
+    await pool.query('DELETE FROM trips WHERE trip_id = $1 OR id = $1', [id]);
+    res.json({ success: true, message: 'Data perjalanan berhasil dihapus' });
+  } catch (err) {
+    console.error('Delete Trip Error:', err.message);
     res.status(500).json({ success: false, message: err.message });
   }
 });
