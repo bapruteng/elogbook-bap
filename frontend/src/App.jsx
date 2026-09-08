@@ -10,19 +10,14 @@ export default function App() {
   const [user, setUser] = useState(null);
   const [loginForm, setLoginForm] = useState({ username: '', password: '', role: 'driver' });
   const [activeTab, setActiveTab] = useState('trip');
-  
-  // State Offline Detection & Sync
   const [isOffline, setIsOffline] = useState(!navigator.onLine);
 
-  // State Master Data & Reports
   const [master, setMaster] = useState({ vehicles: [], drivers: [], destinations: [] });
   const [reports, setReports] = useState([]);
   const [selectedPhoto, setSelectedPhoto] = useState(null);
 
-  // State Filter Admin
   const [filters, setFilters] = useState({ start_date: '', end_date: '', vehicle_id: '' });
   
-  // State Logbook AMT
   const [tripForm, setTripForm] = useState({
     vehicle_id: '',
     amt2_id: '',
@@ -37,7 +32,6 @@ export default function App() {
   const [activeTrip, setActiveTrip] = useState(null);
   const [loading, setLoading] = useState(false);
 
-  // State Master Forms
   const [newDriver, setNewDriver] = useState({ name: '', username: '', password: '' });
   const [editingDriverId, setEditingDriverId] = useState(null);
 
@@ -47,7 +41,6 @@ export default function App() {
   const [newDestination, setNewDestination] = useState({ location_name: '' });
   const [editingDestinationId, setEditingDestinationId] = useState(null);
 
-  // LISTEN KONEKSI OFFLINE & AUTO-SYNC DRAFT
   useEffect(() => {
     fetchMasterData();
 
@@ -56,11 +49,10 @@ export default function App() {
       const pendingTrip = localStorage.getItem('pending_offline_trip');
       if (pendingTrip) {
         alert('🌐 Sinyal terhubung kembali! Mengirimkan data draft logbook...');
-        const payload = JSON.parse(pendingTrip);
-        axios.post(`${API_URL}/trips/start`, payload)
+        axios.post(`${API_URL}/trips/start`, JSON.parse(pendingTrip))
           .then(() => {
             localStorage.removeItem('pending_offline_trip');
-            alert('✅ Draft logbook offline berhasil tersinkronisasi ke server!');
+            alert('✅ Draft logbook offline berhasil tersinkronisasi!');
           })
           .catch((err) => console.error('Gagal sync offline:', err));
       }
@@ -77,48 +69,18 @@ export default function App() {
     };
   }, []);
 
-  // FUNGSI FETCH MASTER DATA (Sinkron dengan vehicles/trucks/drivers/destinations)
   const fetchMasterData = async () => {
     try {
-      const [resDrivers, resTrucks, resDestinations] = await Promise.all([
+      const [resDrivers, resVehicles, resDestinations] = await Promise.all([
         axios.get(`${API_URL}/drivers`),
-        axios.get(`${API_URL}/vehicles`).catch(() => axios.get(`${API_URL}/trucks`)),
+        axios.get(`${API_URL}/vehicles`),
         axios.get(`${API_URL}/destinations`)
       ]);
 
-      const driversData = Array.isArray(resDrivers.data) ? resDrivers.data : (resDrivers.data.data || []);
-      const trucksData = Array.isArray(resTrucks.data) ? resTrucks.data : (resTrucks.data.data || []);
-      const destsData = Array.isArray(resDestinations.data) ? resDestinations.data : (resDestinations.data.data || []);
-
-      // Format Armada
-      const formattedVehicles = trucksData.map(t => ({
-        ...t,
-        vehicle_id: t.vehicle_id || t.truck_id || t.id,
-        plate_number: t.plate_number || t.plateNumber || '',
-        brand: t.brand || 'Mitsubishi',
-        capacity: t.capacity || 8,
-        compartment: t.compartment || `${t.capacity || 8} KL`
-      }));
-
-      // Format Drivers
-      const formattedDrivers = driversData.map(d => ({
-        ...d,
-        driver_id: d.driver_id || d.id,
-        name: d.name || '',
-        username: d.username || ''
-      }));
-
-      // Format Destinations
-      const formattedDestinations = destsData.map(dst => ({
-        ...dst,
-        destination_id: dst.destination_id || dst.id,
-        location_name: dst.location_name || dst.name || ''
-      }));
-
       setMaster({
-        drivers: formattedDrivers,
-        vehicles: formattedVehicles,
-        destinations: formattedDestinations
+        drivers: Array.isArray(resDrivers.data) ? resDrivers.data : [],
+        vehicles: Array.isArray(resVehicles.data) ? resVehicles.data : [],
+        destinations: Array.isArray(resDestinations.data) ? resDestinations.data : []
       });
     } catch (err) {
       console.error('Gagal mengambil master data:', err);
@@ -128,27 +90,8 @@ export default function App() {
   const fetchReports = () => {
     axios.get(`${API_URL}/trips`, { params: filters })
       .then((res) => {
-        const rawData = Array.isArray(res.data) ? res.data : (res.data.data || []);
-        const formattedReports = rawData.map(r => ({
-          ...r,
-          trip_id: r.trip_id || r.id,
-          plate_number: r.plate_number || '-',
-          amt1_name: r.driver_name || r.amt1_name || 'Driver',
-          amt2_name: r.amt2_name || '',
-          destination_name: r.destination || r.destination_name || '-',
-          customer_name: r.customer_name || r.destination || '-',
-          fuel_type: r.fuel_type || 'Biosolar',
-          fuel_volume: r.volume || r.fuel_volume || 0,
-          start_time: r.start_time || r.created_at,
-          end_time: r.end_time,
-          start_gps: r.start_lat ? `${r.start_lat},${r.start_lng}` : r.start_gps,
-          end_gps: r.end_lat ? `${r.end_lat},${r.end_lng}` : r.end_gps,
-          start_photo: r.start_photo,
-          end_photo: r.end_photo,
-          notes: r.notes || r.end_notes || '-',
-          status: r.status || 'IN_PROGRESS'
-        }));
-        setReports(formattedReports);
+        const rawData = Array.isArray(res.data) ? res.data : [];
+        setReports(rawData);
       })
       .catch((err) => console.error('Gagal mengambil data laporan:', err));
   };
@@ -163,7 +106,6 @@ export default function App() {
     fetchReports();
   };
 
-  // EXPORT EXCEL
   const exportToExcel = () => {
     const dataToExport = reports.map(r => ({
       'ID Trip': r.trip_id,
@@ -186,7 +128,6 @@ export default function App() {
     XLSX.writeFile(workbook, `Logbook_BAP_${new Date().toISOString().slice(0,10)}.xlsx`);
   };
 
-  // EXPORT PDF
   const exportToPDF = () => {
     const doc = new jsPDF('landscape');
     doc.text("PT BINTANG AGUNG PRIMA - LAPORAN LOGBOOK ARMADA BBM", 14, 15);
@@ -210,7 +151,6 @@ export default function App() {
     doc.save(`Laporan_BAP_${new Date().toISOString().slice(0,10)}.pdf`);
   };
 
-  // WATERMARK FOTO AUTOMATIC (REVISI KOMPRESI MAX 800PX & KUALITAS 0.6 UNTUK CEGAH ERROR 500)
   const handlePhotoCapture = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -226,7 +166,6 @@ export default function App() {
         const canvas = document.createElement('canvas');
         const ctx = canvas.getContext('2d');
 
-        // Batasi resolusi maksimal gambar agar ringan dikirim
         const maxWidth = 800;
         const scale = maxWidth / img.width;
         canvas.width = maxWidth;
@@ -258,7 +197,6 @@ export default function App() {
     reader.readAsDataURL(file);
   };
 
-  // FUNGSI LOGIN
   const handleLogin = async (e) => {
     e.preventDefault();
     try {
@@ -270,37 +208,25 @@ export default function App() {
           fetchReports();
         } else {
           setActiveTab('trip');
-          if (res.data.user && (res.data.user.driver_id || res.data.user.id)) {
-            checkActiveTrip(res.data.user.driver_id || res.data.user.id);
+          if (res.data.user && res.data.user.driver_id) {
+            checkActiveTrip(res.data.user.driver_id);
           }
         }
       } else {
         alert('Login gagal! Periksa kembali username dan password.');
       }
     } catch (err) {
-      let messageToShow = 'Login gagal! Periksa koneksi internet atau username/password.';
-      if (err.response && err.response.data) {
-        const errData = err.response.data.message || err.response.data.error;
-        if (typeof errData === 'string') {
-          messageToShow = errData;
-        }
-      }
-      alert(messageToShow);
+      alert('Login gagal! Periksa koneksi internet atau username/password.');
     }
   };
 
-  const checkActiveTrip = (driverId) => {
+  const checkActiveTrip = () => {
     axios.get(`${API_URL}/trips`)
       .then((res) => {
-        const rawData = Array.isArray(res.data) ? res.data : (res.data.data || []);
-        const active = rawData.find(t => t.status === 'IN_PROGRESS');
+        const rawData = Array.isArray(res.data) ? res.data : [];
+        const active = rawData.find(t => t.status === 'IN_PROGRESS' && t.amt1_id === user.user.driver_id);
         if (active) {
-          setActiveTrip({
-            trip_id: active.trip_id || active.id,
-            destination_name: active.destination || active.destination_name,
-            fuel_type: active.fuel_type,
-            fuel_volume: active.volume || active.fuel_volume
-          });
+          setActiveTrip(active);
         } else {
           setActiveTrip(null);
         }
@@ -335,19 +261,17 @@ export default function App() {
 
     setLoading(true);
     const gps = await getGPS();
-    const selectedVehicle = master.vehicles.find(v => v.vehicle_id === parseInt(tripForm.vehicle_id));
 
     const payload = {
-      driver_name: user.user.name,
-      plate_number: selectedVehicle ? selectedVehicle.plate_number : '',
+      vehicle_id: tripForm.vehicle_id,
+      amt1_id: user.user.driver_id,
+      amt2_id: tripForm.amt2_id || null,
+      destination_name: tripForm.destination_name,
+      customer_name: tripForm.customer_name || tripForm.destination_name,
       fuel_type: tripForm.fuel_type,
-      fuel_volume: tripForm.fuel_volume || (selectedVehicle ? selectedVehicle.capacity : 8),
-      destination: tripForm.destination_name,
+      fuel_volume: tripForm.fuel_volume,
       notes: tripForm.notes,
       start_gps: gps,
-      latitude: gps.split(',')[0],
-      longitude: gps.split(',')[1],
-      photo_url: watermarkedPhoto,
       photo_base64: watermarkedPhoto
     };
 
@@ -356,19 +280,13 @@ export default function App() {
       setActiveTrip({ destination_name: tripForm.destination_name, fuel_type: tripForm.fuel_type, fuel_volume: tripForm.fuel_volume });
       setWatermarkedPhoto(null);
       setLoading(false);
-      alert('⚠️ Sinyal Terputus! Logbook disimpan sebagai Draft Lokal dan akan dikirim otomatis begitu ada sinyal.');
+      alert('⚠️ Sinyal Terputus! Logbook disimpan sebagai Draft Lokal.');
       return;
     }
 
     try {
       const res = await axios.post(`${API_URL}/trips/start`, payload);
-      const tripData = res.data.data || res.data.trip || res.data;
-      setActiveTrip({
-        trip_id: tripData.trip_id || tripData.id,
-        destination_name: tripForm.destination_name,
-        fuel_type: tripForm.fuel_type,
-        fuel_volume: tripForm.fuel_volume
-      });
+      setActiveTrip(res.data.data || res.data.trip);
       setWatermarkedPhoto(null);
       alert('🚀 Perjalanan Resmi Dimulai! Selamat Jalan.');
     } catch (err) {
@@ -386,9 +304,6 @@ export default function App() {
       await axios.post(`${API_URL}/trips/end`, {
         trip_id: activeTrip.trip_id,
         end_gps: gps,
-        latitude: gps.split(',')[0],
-        longitude: gps.split(',')[1],
-        photo_url: watermarkedPhoto,
         photo_base64: watermarkedPhoto,
         end_notes: endNotes
       });
@@ -416,21 +331,14 @@ export default function App() {
     }
   };
 
-  // CRUD MASTER HANDLERS
   const handleSaveDriver = async (e) => {
     e.preventDefault();
     try {
       await axios.post(`${API_URL}/drivers`, newDriver);
       alert('Driver AMT berhasil ditambahkan!');
       setNewDriver({ name: '', username: '', password: '' });
-      setEditingDriverId(null);
       fetchMasterData();
     } catch (err) { alert('Gagal menyimpan data driver'); }
-  };
-
-  const startEditDriver = (driver) => {
-    setEditingDriverId(driver.driver_id);
-    setNewDriver({ name: driver.name, username: driver.username || '', password: driver.password || '123456' });
   };
 
   const handleDeleteDriver = async (id) => {
@@ -446,19 +354,8 @@ export default function App() {
       await axios.post(`${API_URL}/vehicles`, newVehicle);
       alert('Armada berhasil ditambahkan!');
       setNewVehicle({ plate_number: '', brand: '', capacity: '', compartment: '' });
-      setEditingVehicleId(null);
       fetchMasterData();
     } catch (err) { alert('Gagal menyimpan data armada'); }
-  };
-
-  const startEditVehicle = (vehicle) => {
-    setEditingVehicleId(vehicle.vehicle_id);
-    setNewVehicle({
-      plate_number: vehicle.plate_number,
-      brand: vehicle.brand,
-      capacity: vehicle.capacity,
-      compartment: vehicle.compartment
-    });
   };
 
   const handleDeleteVehicle = async (id) => {
@@ -474,14 +371,8 @@ export default function App() {
       await axios.post(`${API_URL}/destinations`, newDestination);
       alert('Lokasi tujuan berhasil ditambahkan!');
       setNewDestination({ location_name: '' });
-      setEditingDestinationId(null);
       fetchMasterData();
     } catch (err) { alert('Gagal menyimpan lokasi'); }
-  };
-
-  const startEditDestination = (dst) => {
-    setEditingDestinationId(dst.destination_id);
-    setNewDestination({ location_name: dst.location_name });
   };
 
   const handleDeleteDestination = async (id) => {
@@ -491,12 +382,10 @@ export default function App() {
     }
   };
 
-  // STATS
   const inProgressCount = reports.filter(r => r.status === 'IN_PROGRESS').length;
   const completedCount = reports.filter(r => r.status === 'COMPLETED').length;
   const totalVolumeKL = reports.reduce((acc, r) => acc + (parseFloat(r.fuel_volume) || 0), 0);
 
-  // LOGIN PAGE
   if (!user) {
     return (
       <div style={styles.loginContainer}>
@@ -709,9 +598,9 @@ export default function App() {
                   {reports.map((r) => (
                     <tr key={r.trip_id}>
                       <td>#{r.trip_id}</td>
-                      <td><strong>{r.plate_number}</strong></td>
+                      <td><strong>{r.plate_number || '-'}</strong></td>
                       <td>
-                        <strong>{r.amt1_name}</strong><br/>
+                        <strong>{r.amt1_name || 'Driver'}</strong><br/>
                         <small style={{ color: '#666' }}>{r.amt2_name ? `+ ${r.amt2_name}` : '(Solo)'}</small>
                       </td>
                       <td>
@@ -748,12 +637,7 @@ export default function App() {
                 <input type="text" placeholder="Nama Lengkap" required style={styles.inputInline} value={newDriver.name} onChange={(e) => setNewDriver({ ...newDriver, name: e.target.value })} />
                 <input type="text" placeholder="Username" required style={styles.inputInline} value={newDriver.username} onChange={(e) => setNewDriver({ ...newDriver, username: e.target.value })} />
                 <input type="password" placeholder="Password" required style={styles.inputInline} value={newDriver.password} onChange={(e) => setNewDriver({ ...newDriver, password: e.target.value })} />
-                <button type="submit" style={editingDriverId ? styles.updateBtn : styles.addBtn}>
-                  {editingDriverId ? '💾 Simpan Perubahan' : '+ Tambah AMT'}
-                </button>
-                {editingDriverId && (
-                  <button type="button" onClick={() => { setEditingDriverId(null); setNewDriver({ name: '', username: '', password: '' }); }} style={styles.cancelBtn}>Batal</button>
-                )}
+                <button type="submit" style={styles.addBtn}>+ Tambah AMT</button>
               </form>
 
               <table border="1" cellPadding="8" cellSpacing="0" style={styles.table}>
@@ -767,7 +651,6 @@ export default function App() {
                     <tr key={d.driver_id}>
                       <td>{d.driver_id}</td><td>{d.name}</td><td>{d.username || '-'}</td>
                       <td>
-                        <button onClick={() => startEditDriver(d)} style={styles.editBtn}>✏️ Edit</button>
                         <button onClick={() => handleDeleteDriver(d.driver_id)} style={styles.delBtn}>🗑️ Hapus</button>
                       </td>
                     </tr>
@@ -785,12 +668,7 @@ export default function App() {
                 <input type="text" placeholder="Merk (Mitsubishi/Hino)" required style={styles.inputInline} value={newVehicle.brand} onChange={(e) => setNewVehicle({ ...newVehicle, brand: e.target.value })} />
                 <input type="number" placeholder="Kapasitas (KL)" required style={styles.inputInline} value={newVehicle.capacity} onChange={(e) => setNewVehicle({ ...newVehicle, capacity: e.target.value })} />
                 <input type="text" placeholder="Kompartemen (e.g. 5 KL)" required style={styles.inputInline} value={newVehicle.compartment} onChange={(e) => setNewVehicle({ ...newVehicle, compartment: e.target.value })} />
-                <button type="submit" style={editingVehicleId ? styles.updateBtn : styles.addBtn}>
-                  {editingVehicleId ? '💾 Simpan Perubahan' : '+ Tambah Mobil'}
-                </button>
-                {editingVehicleId && (
-                  <button type="button" onClick={() => { setEditingVehicleId(null); setNewVehicle({ plate_number: '', brand: '', capacity: '', compartment: '' }); }} style={styles.cancelBtn}>Batal</button>
-                )}
+                <button type="submit" style={styles.addBtn}>+ Tambah Mobil</button>
               </form>
 
               <table border="1" cellPadding="8" cellSpacing="0" style={styles.table}>
@@ -804,7 +682,6 @@ export default function App() {
                     <tr key={v.vehicle_id}>
                       <td>{v.vehicle_id}</td><td><strong>{v.plate_number}</strong></td><td>{v.brand}</td><td>{v.capacity} KL ({v.compartment})</td>
                       <td>
-                        <button onClick={() => startEditVehicle(v)} style={styles.editBtn}>✏️ Edit</button>
                         <button onClick={() => handleDeleteVehicle(v.vehicle_id)} style={styles.delBtn}>🗑️ Hapus</button>
                       </td>
                     </tr>
@@ -819,12 +696,7 @@ export default function App() {
               <h3>MANAJEMEN MASTER LOKASI TUJUAN</h3>
               <form onSubmit={handleSaveDestination} style={styles.formInline}>
                 <input type="text" placeholder="Nama Lokasi / SPBU / Site" required style={{ ...styles.inputInline, width: '300px' }} value={newDestination.location_name} onChange={(e) => setNewDestination({ location_name: e.target.value })} />
-                <button type="submit" style={editingDestinationId ? styles.updateBtn : styles.addBtn}>
-                  {editingDestinationId ? '💾 Simpan Perubahan' : '+ Tambah Tujuan'}
-                </button>
-                {editingDestinationId && (
-                  <button type="button" onClick={() => { setEditingDestinationId(null); setNewDestination({ location_name: '' }); }} style={styles.cancelBtn}>Batal</button>
-                )}
+                <button type="submit" style={styles.addBtn}>+ Tambah Tujuan</button>
               </form>
 
               <table border="1" cellPadding="8" cellSpacing="0" style={styles.table}>
@@ -838,7 +710,6 @@ export default function App() {
                     <tr key={dst.destination_id}>
                       <td>{dst.destination_id}</td><td>{dst.location_name}</td>
                       <td>
-                        <button onClick={() => startEditDestination(dst)} style={styles.editBtn}>✏️ Edit</button>
                         <button onClick={() => handleDeleteDestination(dst.destination_id)} style={styles.delBtn}>🗑️ Hapus</button>
                       </td>
                     </tr>
@@ -886,9 +757,6 @@ const styles = {
   formInline: { display: 'flex', gap: '10px', marginBottom: '15px', flexWrap: 'wrap' },
   inputInline: { padding: '8px', fontSize: '14px', borderRadius: '4px', border: '1px solid #ccc' },
   addBtn: { backgroundColor: '#28a745', color: '#fff', border: 'none', padding: '8px 15px', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' },
-  updateBtn: { backgroundColor: '#ffc107', color: '#000', border: 'none', padding: '8px 15px', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' },
-  cancelBtn: { backgroundColor: '#6c757d', color: '#fff', border: 'none', padding: '8px 15px', borderRadius: '4px', cursor: 'pointer' },
-  editBtn: { backgroundColor: '#ffc107', color: '#000', border: 'none', padding: '4px 8px', borderRadius: '4px', cursor: 'pointer', fontSize: '12px', marginRight: '5px' },
   delBtn: { backgroundColor: '#dc3545', color: '#fff', border: 'none', padding: '4px 8px', borderRadius: '4px', cursor: 'pointer', fontSize: '12px' },
   mapLink: { display: 'inline-block', fontSize: '12px', color: '#0056b3', marginTop: '3px', fontWeight: 'bold' },
   photoBtn: { backgroundColor: '#28a745', color: '#fff', border: 'none', padding: '5px 8px', borderRadius: '4px', cursor: 'pointer', fontSize: '11px', margin: '2px' },
