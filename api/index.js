@@ -5,10 +5,18 @@ const https = require('https');
 
 const app = express();
 
-// Middleware
+// Middleware Standard
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+
+// Middleware Otomatis Memotong Prefiks /api (Mencegah Error Cannot GET /api/...)
+app.use((req, res, next) => {
+  if (req.url.startsWith('/api')) {
+    req.url = req.url.replace('/api', '') || '/';
+  }
+  next();
+});
 
 // Database Connection (Supabase Transaction Pooler)
 const pool = new Pool({
@@ -64,7 +72,7 @@ function sendWhatsAppNotification(message) {
 // 1. AUTHENTICATION & LOGIN
 // =================================================================
 
-app.post('/api/login', async (req, res) => {
+app.post(['/login', '/auth/login'], async (req, res) => {
   const { username, password } = req.body;
 
   if (!username || !password) {
@@ -113,11 +121,11 @@ app.post('/api/login', async (req, res) => {
 // 2. MASTER DATA: DRIVERS (AMT / SOPIR)
 // =================================================================
 
-app.get(['/api/drivers', '/api/master/drivers'], async (req, res) => {
+app.get(['/drivers', '/master/drivers'], async (req, res) => {
   try {
     const result = await pool.query('SELECT * FROM drivers ORDER BY driver_id ASC');
     
-    // Mapping agar fleksibel dibaca oleh React (camelCase & snake_case)
+    // Normalisasi agar dibaca React (baik camelCase maupun snake_case)
     const formattedData = result.rows.map(driver => ({
       ...driver,
       id: driver.driver_id || driver.id,
@@ -137,7 +145,7 @@ app.get(['/api/drivers', '/api/master/drivers'], async (req, res) => {
   }
 });
 
-app.post(['/api/drivers', '/api/master/drivers'], async (req, res) => {
+app.post(['/drivers', '/master/drivers'], async (req, res) => {
   const { name, username, password, license_id, licenseId, pin_code, pinCode, status } = req.body;
 
   if (!name || !username || !password) {
@@ -172,7 +180,7 @@ app.post(['/api/drivers', '/api/master/drivers'], async (req, res) => {
   }
 });
 
-app.delete(['/api/drivers/:id', '/api/master/drivers/:id'], async (req, res) => {
+app.delete(['/drivers/:id', '/master/drivers/:id'], async (req, res) => {
   const { id } = req.params;
   try {
     await pool.query('DELETE FROM drivers WHERE driver_id = $1 OR id = $1', [id]);
@@ -187,7 +195,7 @@ app.delete(['/api/drivers/:id', '/api/master/drivers/:id'], async (req, res) => 
 // 3. MASTER DATA: TRUCKS (ARMADA TANGKI)
 // =================================================================
 
-app.get(['/api/trucks', '/api/master/trucks'], async (req, res) => {
+app.get(['/trucks', '/master/trucks'], async (req, res) => {
   try {
     const result = await pool.query('SELECT * FROM trucks ORDER BY plate_number ASC');
     
@@ -207,7 +215,7 @@ app.get(['/api/trucks', '/api/master/trucks'], async (req, res) => {
   }
 });
 
-app.post(['/api/trucks', '/api/master/trucks'], async (req, res) => {
+app.post(['/trucks', '/master/trucks'], async (req, res) => {
   const { plate_number, plateNumber, capacity } = req.body;
   const finalPlate = plate_number || plateNumber;
 
@@ -236,7 +244,7 @@ app.post(['/api/trucks', '/api/master/trucks'], async (req, res) => {
   }
 });
 
-app.delete(['/api/trucks/:id', '/api/master/trucks/:id'], async (req, res) => {
+app.delete(['/trucks/:id', '/master/trucks/:id'], async (req, res) => {
   const { id } = req.params;
   try {
     await pool.query('DELETE FROM trucks WHERE truck_id = $1 OR id = $1', [id]);
@@ -251,7 +259,7 @@ app.delete(['/api/trucks/:id', '/api/master/trucks/:id'], async (req, res) => {
 // 4. MASTER DATA: DESTINATIONS (TUJUAN)
 // =================================================================
 
-app.get(['/api/destinations', '/api/master/destinations'], async (req, res) => {
+app.get(['/destinations', '/master/destinations'], async (req, res) => {
   try {
     const result = await pool.query('SELECT * FROM destinations ORDER BY name ASC');
     
@@ -263,8 +271,7 @@ app.get(['/api/destinations', '/api/master/destinations'], async (req, res) => {
 
     res.json({ success: true, data: formattedData });
   } catch (err) {
-    // Jika tabel destinations belum dibuat di Supabase, berikan daftar default agar tidak error
-    console.error('Get Destinations Error:', err.message);
+    // Fallback default jika tabel belum tersedia
     res.json({ 
       success: true, 
       data: [
@@ -281,7 +288,7 @@ app.get(['/api/destinations', '/api/master/destinations'], async (req, res) => {
 // 5. TRIPS & LOGBOOK MANAGEMENT
 // =================================================================
 
-app.get('/api/trips', async (req, res) => {
+app.get('/trips', async (req, res) => {
   try {
     const result = await pool.query('SELECT * FROM trips ORDER BY created_at DESC');
     res.json({ success: true, data: result.rows });
@@ -291,7 +298,7 @@ app.get('/api/trips', async (req, res) => {
   }
 });
 
-app.post('/api/trips/start', async (req, res) => {
+app.post('/trips/start', async (req, res) => {
   const { driver_name, driverName, plate_number, plateNumber, fuel_type, fuelType, volume, destination, notes, latitude, longitude, photo_url, photoUrl } = req.body;
 
   const finalDriver = driver_name || driverName;
@@ -332,7 +339,7 @@ _Status: Dalam Perjalanan (IN_PROGRESS)_`;
   }
 });
 
-app.post('/api/trips/end', async (req, res) => {
+app.post('/trips/end', async (req, res) => {
   const { trip_id, tripId, end_notes, endNotes, latitude, longitude, photo_url, photoUrl } = req.body;
 
   const finalTripId = trip_id || tripId;
@@ -375,7 +382,7 @@ _Status: Selesai (COMPLETED)_`;
   }
 });
 
-app.get('/api', (req, res) => {
+app.get(['/', '/health'], (req, res) => {
   res.json({ success: true, message: 'E-Logbook BAP API is running smoothly' });
 });
 
