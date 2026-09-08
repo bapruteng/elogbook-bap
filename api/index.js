@@ -2,6 +2,7 @@ const express = require('express');
 const cors = require('cors');
 const { Pool } = require('pg');
 const multer = require('multer');
+const https = require('https');
 
 const app = express();
 const upload = multer({ limits: { fileSize: 10 * 1024 * 1024 } }); // Limit 10MB
@@ -16,28 +17,39 @@ const pool = new Pool({
   ssl: { rejectUnauthorized: false }
 });
 
-// FUNGSI NOTIFIKASI FONNTE WA
-const sendWANotif = async (message) => {
+// FUNGSI NOTIFIKASI FONNTE WA (MENGGUNAKAN HTTPS NODE.JS AMAN NO-CRASH)
+const sendWANotif = (message) => {
   const targetPhone = process.env.WA_TARGET_PHONE;
   const waToken = process.env.WA_API_TOKEN;
 
   if (!waToken || !targetPhone) return;
 
-  try {
-    await fetch('https://api.fonnte.com/send', {
-      method: 'POST',
-      headers: {
-        'Authorization': waToken,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        target: targetPhone,
-        message: message,
-      })
-    });
-  } catch (err) {
-    console.error('Gagal kirim WA Fonnte:', err);
-  }
+  const data = JSON.stringify({
+    target: targetPhone,
+    message: message
+  });
+
+  const options = {
+    hostname: 'api.fonnte.com',
+    path: '/send',
+    method: 'POST',
+    headers: {
+      'Authorization': waToken,
+      'Content-Type': 'application/json',
+      'Content-Length': Buffer.byteLength(data)
+    }
+  };
+
+  const req = https.request(options, (res) => {
+    res.on('data', () => {});
+  });
+
+  req.on('error', (e) => {
+    console.error('Gagal kirim WA Fonnte:', e.message);
+  });
+
+  req.write(data);
+  req.end();
 };
 
 // 1. ENDPOINT LOGIN
@@ -62,7 +74,7 @@ app.post('/api/login', async (req, res) => {
     }
   } catch (err) {
     console.error(err);
-    res.status(500).json({ error: 'Terjadi kesalahan koneksi database saat login' });
+    res.status(500).json({ error: 'Terjadi kesalahan database' });
   }
 });
 
@@ -127,7 +139,6 @@ app.post('/api/trips/start', upload.single('photo'), async (req, res) => {
     const result = await pool.query(query, values);
     await pool.query("UPDATE vehicles SET status = 'IN_USE' WHERE vehicle_id = $1", [vehicle_id]);
 
-    // Kirim Notifikasi WA Fonnte
     const waMsg = 
 `🚨 *LOKASI KEBERANGKATAN ARMADA BAP* 🚨\n\n` +
 `🚛 *Armada ID:* ${vehicle_id}\n` +
@@ -160,7 +171,6 @@ app.post('/api/trips/end', upload.single('photo'), async (req, res) => {
     const result = await pool.query(query, [end_gps, photo_base64 || null, notes || null, trip_id]);
     await pool.query("UPDATE vehicles SET status = 'AVAILABLE' WHERE vehicle_id = $1", [vehicle_id]);
 
-    // Kirim Notifikasi WA Fonnte
     const waMsg = 
 `✅ *ARMADA TIBA DI TUJUAN* ✅\n\n` +
 `🚛 *Armada ID:* ${vehicle_id}\n` +
@@ -177,7 +187,7 @@ app.post('/api/trips/end', upload.single('photo'), async (req, res) => {
   }
 });
 
-// 6. ENDPOINT REKAP LAPORAN DENGAN FILTER
+// 6. ENDPOINT REKAP LAPORAN
 app.get('/api/reports', async (req, res) => {
   const { start_date, end_date, vehicle_id } = req.query;
 
@@ -230,7 +240,7 @@ app.get('/api/reports', async (req, res) => {
   }
 });
 
-// 7. ENDPOINT CRUD MASTER (DRIVERS, VEHICLES, DESTINATIONS)
+// 7. ENDPOINT CRUD MASTER
 app.post('/api/master/drivers', async (req, res) => {
   const { name, username, password } = req.body;
   try {
@@ -300,7 +310,7 @@ app.delete('/api/master/destinations/:id', async (req, res) => {
   } catch (err) { res.status(500).json({ error: 'Gagal hapus lokasi' }); }
 });
 
-// 8. ENDPOINT HAPUS TRIP (KHUSUS ADMIN)
+// 8. ENDPOINT HAPUS TRIP
 app.delete('/api/trips/:id', async (req, res) => {
   const { id } = req.params;
   try {
