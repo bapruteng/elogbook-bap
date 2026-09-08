@@ -196,16 +196,23 @@ app.delete(['/drivers/:id', '/master/drivers/:id'], async (req, res) => {
 // 3. MASTER DATA: TRUCKS (ARMADA TANGKI)
 // =================================================================
 
-app.get(['/trucks', '/master/trucks'], async (req, res) => {
+app.get(['/trucks', '/master/trucks', '/vehicles', '/master/vehicles'], async (req, res) => {
   try {
-    const result = await pool.query('SELECT * FROM trucks ORDER BY plate_number ASC');
+    // Coba query dari tabel vehicles terlebih dahulu, jika gagal fallback ke trucks
+    let result;
+    try {
+      result = await pool.query('SELECT * FROM vehicles ORDER BY plate_number ASC');
+    } catch (e) {
+      result = await pool.query('SELECT * FROM trucks ORDER BY plate_number ASC');
+    }
     
     const formattedData = result.rows.map(truck => ({
       ...truck,
-      id: truck.truck_id || truck.id,
-      truck_id: truck.truck_id || truck.id,
-      plateNumber: truck.plate_number || truck.plateNumber || '',
-      plate_number: truck.plate_number || truck.plateNumber || '',
+      id: truck.vehicle_id || truck.truck_id || truck.id,
+      vehicle_id: truck.vehicle_id || truck.truck_id || truck.id,
+      truck_id: truck.vehicle_id || truck.truck_id || truck.id,
+      plateNumber: truck.plate_number || '',
+      plate_number: truck.plate_number || '',
       brand: truck.brand || 'Mitsubishi',
       capacity: truck.capacity || 8,
       compartment: truck.compartment || `${truck.capacity || 8} KL`
@@ -213,11 +220,8 @@ app.get(['/trucks', '/master/trucks'], async (req, res) => {
 
     res.json(formattedData);
   } catch (err) {
-    console.error('Get Trucks Error:', err.message);
-    // Fallback armada dasar
-    res.json([
-      { id: 1, truck_id: 1, plate_number: 'EB 8547 EB', brand: 'Mitsubishi', capacity: 8, compartment: '8 KL' }
-    ]);
+    console.error('Get Vehicles Error:', err.message);
+    res.json([]);
   }
 });
 
