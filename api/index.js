@@ -21,13 +21,21 @@ const pool = new Pool({
   ssl: { rejectUnauthorized: false }
 });
 
+// Helper Function: Kirim Notifikasi WA via Fonnte
 function sendWhatsAppNotification(message) {
   const token = process.env.WA_API_TOKEN;
   const target = process.env.WA_TARGET_PHONE;
 
-  if (!token || !target) return;
+  if (!token || !target) {
+    console.log('WA Notification skipped: Token atau Target HP belum diset di Vercel Env.');
+    return;
+  }
 
-  const postData = JSON.stringify({ target: target, message: message });
+  const postData = JSON.stringify({
+    target: target,
+    message: message
+  });
+
   const options = {
     hostname: 'api.fonnte.com',
     path: '/send',
@@ -42,8 +50,15 @@ function sendWhatsAppNotification(message) {
   const req = https.request(options, (res) => {
     let data = '';
     res.on('data', (chunk) => { data += chunk; });
+    res.on('end', () => {
+      console.log('Fonnte Response OK:', data);
+    });
   });
-  req.on('error', (e) => console.error('Fonnte Error:', e.message));
+
+  req.on('error', (e) => {
+    console.error('Fonnte Request Error:', e.message);
+  });
+
   req.write(postData);
   req.end();
 }
@@ -186,7 +201,7 @@ app.delete(['/destinations/:id', '/master/destinations/:id'], async (req, res) =
   }
 });
 
-// 5. TRIPS LOGBOOK (REVISI NOTIFIKASI WA DENGAN NAMA AMT 1, AMT 2, DAN PLAT NOMOR)
+// 5. TRIPS LOGBOOK
 app.get(['/trips', '/reports'], async (req, res) => {
   try {
     const { start_date, end_date, vehicle_id } = req.query;
@@ -230,7 +245,7 @@ app.get(['/trips', '/reports'], async (req, res) => {
   }
 });
 
-// START TRIP
+// START TRIP (AMBIL LANGSUNG DETAILS DRIVER & VEHICLE TANPA DEPENDENCY FAIL)
 app.post(['/trips/start', '/start-trip'], async (req, res) => {
   try {
     const { 
@@ -261,33 +276,36 @@ app.post(['/trips/start', '/start-trip'], async (req, res) => {
 
     const trip = result.rows[0];
 
-    // Dapatkan Nama AMT1, AMT2, dan Plat Nomor dari Database untuk Notifikasi WA
+    // Ambil Rincian Nama AMT 1, AMT 2, dan Plat Nomor Secara Terpisah
+    let amt1Name = 'Driver';
+    let amt2Name = '-';
+    let plateNo = '-';
+
     try {
-      const detailsQuery = await pool.query(
-        `SELECT 
-          v.plate_number,
-          d1.name AS amt1_name,
-          d2.name AS amt2_name
-         FROM trips t
-         LEFT JOIN vehicles v ON v.vehicle_id = $1
-         LEFT JOIN drivers d1 ON d1.driver_id = $2
-         LEFT JOIN drivers d2 ON d2.driver_id = $3
-         LIMIT 1`,
-        [parseInt(vehicle_id), parseInt(amt1_id), amt2_id ? parseInt(amt2_id) : null]
-      );
+      if (amt1_id) {
+        const d1Res = await pool.query('SELECT name FROM drivers WHERE driver_id = $1', [parseInt(amt1_id)]);
+        if (d1Res.rows.length > 0) amt1Name = d1Res.rows[0].name;
+      }
+      if (amt2_id) {
+        const d2Res = await pool.query('SELECT name FROM drivers WHERE driver_id = $1', [parseInt(amt2_id)]);
+        if (d2Res.rows.length > 0) amt2Name = d2Res.rows[0].name;
+      }
+      if (vehicle_id) {
+        const vRes = await pool.query('SELECT plate_number FROM vehicles WHERE vehicle_id = $1', [parseInt(vehicle_id)]);
+        if (vRes.rows.length > 0) plateNo = vRes.rows[0].plate_number;
+      }
+    } catch (lookupErr) {
+      console.error('Error lookup names:', lookupErr.message);
+    }
 
-      const details = detailsQuery.rows[0] || {};
-      const amt1Name = details.amt1_name || 'Driver';
-      const amt2Name = details.amt2_name ? ` + ${details.amt2_name}` : ' (Solo)';
-      const plateNo = details.plate_number || '-';
-
-      if (start_gps) {
-        const mapUrl = `https://www.google.com/maps?q=${start_gps}`;
-        const waMessage = 
+    // Kirim Notifikasi WhatsApp ke Grup
+    if (start_gps) {
+      const mapUrl = `https://www.google.com/maps?q=${start_gps}`;
+      const waMessage = 
 `🚀 *E-LOGBOOK BAP: MULAI PERJALANAN*
 ----------------------------------------
 *AMT 1:* ${amt1Name}
-*AMT 2:* ${details.amt2_name || '-'}
+*AMT 2:* ${amt2Name}
 *Armada:* ${plateNo}
 *Tujuan:* ${destination_name}
 *Konsumen:* ${customer_name || '-'}
@@ -297,10 +315,7 @@ app.post(['/trips/start', '/start-trip'], async (req, res) => {
 ----------------------------------------
 _Status: Dalam Perjalanan (IN_PROGRESS)_`;
 
-        sendWhatsAppNotification(waMessage);
-      }
-    } catch (waErr) {
-      console.log('Error susun WA:', waErr.message);
+      sendWhatsAppNotification(waMessage);
     }
 
     res.json({ success: true, data: trip, trip: trip });
@@ -329,31 +344,34 @@ app.post(['/trips/end', '/end-trip'], async (req, res) => {
 
     const trip = result.rows[0];
 
+    let amt1Name = 'Driver';
+    let amt2Name = '-';
+    let plateNo = '-';
+
     try {
-      const detailsQuery = await pool.query(
-        `SELECT 
-          v.plate_number,
-          d1.name AS amt1_name,
-          d2.name AS amt2_name
-         FROM trips t
-         LEFT JOIN vehicles v ON v.vehicle_id = $1
-         LEFT JOIN drivers d1 ON d1.driver_id = $2
-         LEFT JOIN drivers d2 ON d2.driver_id = $3
-         LIMIT 1`,
-        [trip.vehicle_id, trip.amt1_id, trip.amt2_id]
-      );
+      if (trip.amt1_id) {
+        const d1Res = await pool.query('SELECT name FROM drivers WHERE driver_id = $1', [trip.amt1_id]);
+        if (d1Res.rows.length > 0) amt1Name = d1Res.rows[0].name;
+      }
+      if (trip.amt2_id) {
+        const d2Res = await pool.query('SELECT name FROM drivers WHERE driver_id = $1', [trip.amt2_id]);
+        if (d2Res.rows.length > 0) amt2Name = d2Res.rows[0].name;
+      }
+      if (trip.vehicle_id) {
+        const vRes = await pool.query('SELECT plate_number FROM vehicles WHERE vehicle_id = $1', [trip.vehicle_id]);
+        if (vRes.rows.length > 0) plateNo = vRes.rows[0].plate_number;
+      }
+    } catch (lookupErr) {
+      console.error('Error lookup names end trip:', lookupErr.message);
+    }
 
-      const details = detailsQuery.rows[0] || {};
-      const amt1Name = details.amt1_name || 'Driver';
-      const plateNo = details.plate_number || '-';
-
-      if (end_gps) {
-        const mapUrl = `https://www.google.com/maps?q=${end_gps}`;
-        const waMessage = 
+    if (end_gps) {
+      const mapUrl = `https://www.google.com/maps?q=${end_gps}`;
+      const waMessage = 
 `🛑 *E-LOGBOOK BAP: SELESAI PERJALANAN*
 ----------------------------------------
 *AMT 1:* ${amt1Name}
-*AMT 2:* ${details.amt2_name || '-'}
+*AMT 2:* ${amt2Name}
 *Armada:* ${plateNo}
 *Tujuan:* ${trip.destination_name}
 *Catatan Tiba:* ${end_notes || '-'}
@@ -361,10 +379,7 @@ app.post(['/trips/end', '/end-trip'], async (req, res) => {
 ----------------------------------------
 _Status: Selesai (COMPLETED)_`;
 
-        sendWhatsAppNotification(waMessage);
-      }
-    } catch (waErr) {
-      console.log('Error susun WA end trip:', waErr.message);
+      sendWhatsAppNotification(waMessage);
     }
 
     res.json({ success: true, data: trip, trip: trip });
