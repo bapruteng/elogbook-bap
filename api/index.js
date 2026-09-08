@@ -117,7 +117,16 @@ app.post('/api/login', async (req, res) => {
 app.get(['/api/drivers', '/api/master/drivers'], async (req, res) => {
   try {
     const result = await pool.query('SELECT * FROM drivers ORDER BY driver_id ASC');
-    res.json({ success: true, data: result.rows });
+    
+    // Format data agar memiliki 'id' dan 'driver_id' yang fleksibel untuk Frontend React
+    const formattedData = result.rows.map(driver => ({
+      ...driver,
+      id: driver.driver_id || driver.id,
+      licenseId: driver.license_id || driver.licenseId || '-',
+      pinCode: driver.pin_code || driver.pinCode || '1234'
+    }));
+
+    res.json({ success: true, data: formattedData });
   } catch (err) {
     console.error('Get Drivers Error:', err.message);
     res.status(500).json({ success: false, message: err.message });
