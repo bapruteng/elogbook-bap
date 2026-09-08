@@ -355,5 +355,24 @@ app.delete('/api/trips/:id', async (req, res) => {
   }
 });
 
+// -------------------------------------------------------------
+// ENDPOINT CEK ACTIVE TRIP DRIVER (PERSISTENCE)
+// -------------------------------------------------------------
+app.get('/api/trips/active/:driver_id', async (req, res) => {
+  const { driver_id } = req.params;
+  try {
+    const query = `
+      SELECT * FROM trips 
+      WHERE (amt1_id = $1 OR amt2_id = $1) AND status = 'IN_PROGRESS' 
+      ORDER BY start_time DESC LIMIT 1;
+    `;
+    const result = await pool.query(query, [driver_id]);
+    res.json(result.rows[0] || null);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Gagal mengecek status perjalanan aktif' });
+  }
+}); di 
+
 // Khusus Vercel Serverless Function: Ekspor app
 module.exports = app;
