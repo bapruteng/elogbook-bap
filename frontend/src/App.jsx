@@ -190,7 +190,7 @@ export default function App() {
     reader.readAsDataURL(file);
   };
 
-  // LOGIN & RESTORE SESSION ACTIVE TRIP
+  // LOGIN & RESTORE SESSION ACTIVE TRIP (FIXED ERROR DISPLAY)
   const handleLogin = async (e) => {
     e.preventDefault();
     try {
@@ -202,13 +202,17 @@ export default function App() {
           fetchReports();
         } else {
           setActiveTab('trip');
-          // OTOMATIS CEK APAKAH DRIVER MASIH MEMILIKI TRIP AKTIF (IN_PROGRESS)
           checkActiveTrip(res.data.user.driver_id);
         }
       }
     } catch (err) {
-      const msg = err.response?.data?.error || err.message || 'Login gagal!';
-      alert(msg);
+      // Menangani error agar teks dibaca dengan benar (String)
+      const errorMsg = err.response?.data?.error;
+      const messageToShow = typeof errorMsg === 'object' 
+        ? (errorMsg.message || JSON.stringify(errorMsg))
+        : (errorMsg || err.message || 'Login gagal! Periksa username/password.');
+        
+      alert(messageToShow);
     }
   };
 
