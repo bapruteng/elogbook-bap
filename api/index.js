@@ -5,7 +5,7 @@ const https = require('https');
 
 const app = express();
 
-// Middleware Standard
+// Middleware Standard dengan batas payload besar untuk mendukung foto Base64
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
@@ -193,12 +193,11 @@ app.delete(['/drivers/:id', '/master/drivers/:id'], async (req, res) => {
 });
 
 // =================================================================
-// 3. MASTER DATA: TRUCKS (ARMADA TANGKI)
+// 3. MASTER DATA: TRUCKS / VEHICLES (ARMADA TANGKI)
 // =================================================================
 
 app.get(['/trucks', '/master/trucks', '/vehicles', '/master/vehicles'], async (req, res) => {
   try {
-    // Coba query dari tabel vehicles terlebih dahulu, jika gagal fallback ke trucks
     let result;
     try {
       result = await pool.query('SELECT * FROM vehicles ORDER BY plate_number ASC');
@@ -211,8 +210,8 @@ app.get(['/trucks', '/master/trucks', '/vehicles', '/master/vehicles'], async (r
       id: truck.vehicle_id || truck.truck_id || truck.id,
       vehicle_id: truck.vehicle_id || truck.truck_id || truck.id,
       truck_id: truck.vehicle_id || truck.truck_id || truck.id,
-      plateNumber: truck.plate_number || '',
-      plate_number: truck.plate_number || '',
+      plateNumber: truck.plate_number || truck.plateNumber || '',
+      plate_number: truck.plate_number || truck.plateNumber || '',
       brand: truck.brand || 'Mitsubishi',
       capacity: truck.capacity || 8,
       compartment: truck.compartment || `${truck.capacity || 8} KL`
@@ -220,12 +219,12 @@ app.get(['/trucks', '/master/trucks', '/vehicles', '/master/vehicles'], async (r
 
     res.json(formattedData);
   } catch (err) {
-    console.error('Get Vehicles Error:', err.message);
+    console.error('Get Vehicles/Trucks Error:', err.message);
     res.json([]);
   }
 });
 
-app.post(['/trucks', '/master/trucks'], async (req, res) => {
+app.post(['/trucks', '/master/trucks', '/vehicles', '/master/vehicles'], async (req, res) => {
   const { plate_number, plateNumber, brand, capacity, compartment } = req.body;
   const finalPlate = plate_number || plateNumber;
   const finalBrand = brand || 'Mitsubishi';
@@ -237,35 +236,48 @@ app.post(['/trucks', '/master/trucks'], async (req, res) => {
   }
 
   try {
-    const result = await pool.query(
-      'INSERT INTO trucks (plate_number, brand, capacity, compartment) VALUES ($1, $2, $3, $4) RETURNING *',
-      [finalPlate, finalBrand, finalCapacity, finalCompartment]
-    );
+    let result;
+    try {
+      result = await pool.query(
+        'INSERT INTO vehicles (plate_number, brand, capacity, compartment) VALUES ($1, $2, $3, $4) RETURNING *',
+        [finalPlate, finalBrand, finalCapacity, finalCompartment]
+      );
+    } catch (e) {
+      result = await pool.query(
+        'INSERT INTO trucks (plate_number, brand, capacity, compartment) VALUES ($1, $2, $3, $4) RETURNING *',
+        [finalPlate, finalBrand, finalCapacity, finalCompartment]
+      );
+    }
 
     const newTruck = result.rows[0];
     res.json({ 
       success: true, 
       data: {
         ...newTruck,
-        id: newTruck.truck_id,
-        truck_id: newTruck.truck_id,
+        id: newTruck.vehicle_id || newTruck.truck_id,
+        vehicle_id: newTruck.vehicle_id || newTruck.truck_id,
+        truck_id: newTruck.vehicle_id || newTruck.truck_id,
         plateNumber: newTruck.plate_number,
         plate_number: newTruck.plate_number
       } 
     });
   } catch (err) {
-    console.error('Error insert truck:', err.message);
+    console.error('Error insert vehicle/truck:', err.message);
     res.status(500).json({ success: false, message: err.message });
   }
 });
 
-app.delete(['/trucks/:id', '/master/trucks/:id'], async (req, res) => {
+app.delete(['/trucks/:id', '/master/trucks/:id', '/vehicles/:id', '/master/vehicles/:id'], async (req, res) => {
   const { id } = req.params;
   try {
-    await pool.query('DELETE FROM trucks WHERE truck_id = $1 OR id = $1', [id]);
+    try {
+      await pool.query('DELETE FROM vehicles WHERE vehicle_id = $1 OR id = $1', [id]);
+    } catch (e) {
+      await pool.query('DELETE FROM trucks WHERE truck_id = $1 OR id = $1', [id]);
+    }
     res.json({ success: true, message: 'Armada berhasil dihapus' });
   } catch (err) {
-    console.error('Delete Truck Error:', err.message);
+    console.error('Delete Vehicle Error:', err.message);
     res.status(500).json({ success: false, message: err.message });
   }
 });
@@ -340,7 +352,7 @@ app.delete(['/destinations/:id', '/master/destinations/:id'], async (req, res) =
 });
 
 // =================================================================
-// 5. TRIPS & LOGBOOK MANAGEMENT (FILTER TANGGAL & ARMADA SAFE)
+// 5. TRIPS & LOGBOOK MANAGEMENT (REVISI AMAN FILTER & INPUT LOGBOOK)
 // =================================================================
 
 app.get(['/trips', '/reports'], async (req, res) => {
@@ -350,7 +362,7 @@ app.get(['/trips', '/reports'], async (req, res) => {
     let queryText = 'SELECT * FROM trips WHERE 1=1';
     const queryParams = [];
 
-    // Filter Tanggal Mulai
+    // Filter Tanggal Mulai (Penanganan string kosong aman)
     if (start_date && typeof start_date === 'string' && start_date.trim() !== '') {
       queryParams.push(start_date.trim());
       queryText += ` AND start_time >= $${queryParams.length}::timestamp`;
@@ -378,53 +390,100 @@ app.get(['/trips', '/reports'], async (req, res) => {
   }
 });
 
-app.post('/trips/start', async (req, res) => {
-  const { driver_name, driverName, plate_number, plateNumber, fuel_type, fuelType, volume, destination, notes, latitude, longitude, photo_url, photoUrl } = req.body;
-
-  const finalDriver = driver_name || driverName;
-  const finalPlate = plate_number || plateNumber;
-  const finalFuel = fuel_type || fuelType || 'Biosolar';
-  const finalPhoto = photo_url || photoUrl;
-
+app.post(['/trips/start', '/start-trip'], async (req, res) => {
   try {
+    const { 
+      driver_name, driverName, 
+      plate_number, plateNumber, 
+      fuel_type, fuelType, 
+      volume, fuel_volume, 
+      destination, destination_name, 
+      notes, 
+      latitude, longitude, start_gps, 
+      photo_url, photoUrl, photo_base64 
+    } = req.body;
+
+    const finalDriver = driver_name || driverName || 'Driver';
+    const finalPlate = plate_number || plateNumber || 'EB 8547 EB';
+    const finalFuel = fuel_type || fuelType || 'Biosolar';
+    const finalVol = parseFloat(volume || fuel_volume) || 8;
+    const finalDest = destination || destination_name || '-';
+    const finalNotes = notes || '';
+    const finalPhoto = photo_url || photoUrl || photo_base64 || null;
+
+    let lat = latitude;
+    let lng = longitude;
+    if ((!lat || !lng) && start_gps) {
+      const parts = start_gps.split(',');
+      lat = parts[0] ? parts[0].trim() : '-8.601151';
+      lng = parts[1] ? parts[1].trim() : '120.468152';
+    }
+
     const result = await pool.query(
       `INSERT INTO trips 
        (driver_name, plate_number, fuel_type, volume, destination, notes, start_lat, start_lng, start_photo, status, start_time) 
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'IN_PROGRESS', NOW()) 
        RETURNING *`,
-      [finalDriver, finalPlate, finalFuel, volume || 8, destination, notes, latitude, longitude, finalPhoto]
+      [
+        finalDriver, 
+        finalPlate, 
+        finalFuel, 
+        finalVol, 
+        finalDest, 
+        finalNotes, 
+        lat ? String(lat) : null, 
+        lng ? String(lng) : null, 
+        finalPhoto
+      ]
     );
 
     const trip = result.rows[0];
-    const mapUrl = `https://www.google.com/maps?q=${latitude},${longitude}`;
 
-    const waMessage = 
+    try {
+      if (lat && lng) {
+        const mapUrl = `https://www.google.com/maps?q=${lat},${lng}`;
+        const waMessage = 
 `🚀 *E-LOGBOOK BAP: MULAI PERJALANAN*
 ----------------------------------------
 *Driver/AMT:* ${finalDriver}
 *Armada:* ${finalPlate}
-*Muatan:* ${finalFuel} (${volume || 8} KL)
-*Tujuan:* ${destination}
-*Catatan:* ${notes || '-'}
+*Muatan:* ${finalFuel} (${finalVol} KL)
+*Tujuan:* ${finalDest}
+*Catatan:* ${finalNotes || '-'}
 *Lokasi GPS:* ${mapUrl}
 ----------------------------------------
 _Status: Dalam Perjalanan (IN_PROGRESS)_`;
+        sendWhatsAppNotification(waMessage);
+      }
+    } catch (waErr) {
+      console.log('WA notification skipped:', waErr.message);
+    }
 
-    sendWhatsAppNotification(waMessage);
-
-    res.json({ success: true, data: trip });
+    res.json({ success: true, data: trip, trip: trip });
   } catch (err) {
     console.error('Start Trip Error:', err.message);
-    res.status(500).json({ success: false, message: err.message });
+    res.status(500).json({ 
+      success: false, 
+      message: 'Gagal mencatat perjalanan: ' + err.message,
+      error: err.message 
+    });
   }
 });
 
-app.post('/trips/end', async (req, res) => {
-  const { trip_id, tripId, end_notes, endNotes, latitude, longitude, photo_url, photoUrl } = req.body;
+app.post(['/trips/end', '/end-trip'], async (req, res) => {
+  const { trip_id, tripId, end_notes, endNotes, notes, latitude, longitude, end_gps, photo_url, photoUrl, photo_base64 } = req.body;
 
   const finalTripId = trip_id || tripId;
-  const finalNotes = end_notes || endNotes;
-  const finalPhoto = photo_url || photoUrl;
+  const finalNotes = end_notes || endNotes || notes || '';
+  const finalPhoto = photo_url || photoUrl || photo_base64 || null;
+
+  let lat = latitude;
+  let lng = longitude;
+  if ((!lat || !lng) && end_gps) {
+    const parts = end_gps.split(',');
+    lat = parts[0] ? parts[0].trim() : '-8.601151';
+    lng = parts[1] ? parts[1].trim() : '120.468152';
+  }
 
   try {
     const result = await pool.query(
@@ -432,7 +491,7 @@ app.post('/trips/end', async (req, res) => {
        SET status = 'COMPLETED', end_time = NOW(), end_lat = $1, end_lng = $2, end_photo = $3, end_notes = $4 
        WHERE trip_id = $5 OR id = $5
        RETURNING *`,
-      [latitude, longitude, finalPhoto, finalNotes, finalTripId]
+      [lat ? String(lat) : null, lng ? String(lng) : null, finalPhoto, finalNotes, finalTripId]
     );
 
     if (result.rows.length === 0) {
@@ -440,9 +499,11 @@ app.post('/trips/end', async (req, res) => {
     }
 
     const trip = result.rows[0];
-    const mapUrl = `https://www.google.com/maps?q=${latitude},${longitude}`;
 
-    const waMessage = 
+    try {
+      if (lat && lng) {
+        const mapUrl = `https://www.google.com/maps?q=${lat},${lng}`;
+        const waMessage = 
 `🛑 *E-LOGBOOK BAP: SELESAI PERJALANAN*
 ----------------------------------------
 *Driver/AMT:* ${trip.driver_name}
@@ -452,10 +513,13 @@ app.post('/trips/end', async (req, res) => {
 *Lokasi Tiba:* ${mapUrl}
 ----------------------------------------
 _Status: Selesai (COMPLETED)_`;
+        sendWhatsAppNotification(waMessage);
+      }
+    } catch (waErr) {
+      console.log('WA notification skipped:', waErr.message);
+    }
 
-    sendWhatsAppNotification(waMessage);
-
-    res.json({ success: true, data: trip });
+    res.json({ success: true, data: trip, trip: trip });
   } catch (err) {
     console.error('End Trip Error:', err.message);
     res.status(500).json({ success: false, message: err.message });
