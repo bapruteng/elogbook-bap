@@ -186,7 +186,7 @@ app.delete(['/destinations/:id', '/master/destinations/:id'], async (req, res) =
   }
 });
 
-// 5. TRIPS LOGBOOK (JOIN LENGKAP DENGAN TABEL DRIVERS & VEHICLES)
+// 5. TRIPS LOGBOOK (REVISI NOTIFIKASI WA DENGAN NAMA AMT 1, AMT 2, DAN PLAT NOMOR)
 app.get(['/trips', '/reports'], async (req, res) => {
   try {
     const { start_date, end_date, vehicle_id } = req.query;
@@ -230,7 +230,7 @@ app.get(['/trips', '/reports'], async (req, res) => {
   }
 });
 
-// START TRIP (INSERT SESUAI KOLOM TABEL PUBLIC.TRIPS)
+// START TRIP
 app.post(['/trips/start', '/start-trip'], async (req, res) => {
   try {
     const { 
@@ -261,19 +261,47 @@ app.post(['/trips/start', '/start-trip'], async (req, res) => {
 
     const trip = result.rows[0];
 
+    // Dapatkan Nama AMT1, AMT2, dan Plat Nomor dari Database untuk Notifikasi WA
     try {
+      const detailsQuery = await pool.query(
+        `SELECT 
+          v.plate_number,
+          d1.name AS amt1_name,
+          d2.name AS amt2_name
+         FROM trips t
+         LEFT JOIN vehicles v ON v.vehicle_id = $1
+         LEFT JOIN drivers d1 ON d1.driver_id = $2
+         LEFT JOIN drivers d2 ON d2.driver_id = $3
+         LIMIT 1`,
+        [parseInt(vehicle_id), parseInt(amt1_id), amt2_id ? parseInt(amt2_id) : null]
+      );
+
+      const details = detailsQuery.rows[0] || {};
+      const amt1Name = details.amt1_name || 'Driver';
+      const amt2Name = details.amt2_name ? ` + ${details.amt2_name}` : ' (Solo)';
+      const plateNo = details.plate_number || '-';
+
       if (start_gps) {
         const mapUrl = `https://www.google.com/maps?q=${start_gps}`;
-        sendWhatsAppNotification(
+        const waMessage = 
 `🚀 *E-LOGBOOK BAP: MULAI PERJALANAN*
 ----------------------------------------
+*AMT 1:* ${amt1Name}
+*AMT 2:* ${details.amt2_name || '-'}
+*Armada:* ${plateNo}
 *Tujuan:* ${destination_name}
 *Konsumen:* ${customer_name || '-'}
-*Muatan:* ${fuel_type} (${fuel_volume} KL)
-*Lokasi GPS:* ${mapUrl}`
-        );
+*Muatan:* ${fuel_type || 'Biosolar'} (${fuel_volume || 8} KL)
+*Catatan:* ${notes || '-'}
+*Lokasi GPS:* ${mapUrl}
+----------------------------------------
+_Status: Dalam Perjalanan (IN_PROGRESS)_`;
+
+        sendWhatsAppNotification(waMessage);
       }
-    } catch (waErr) {}
+    } catch (waErr) {
+      console.log('Error susun WA:', waErr.message);
+    }
 
     res.json({ success: true, data: trip, trip: trip });
   } catch (err) {
@@ -282,7 +310,7 @@ app.post(['/trips/start', '/start-trip'], async (req, res) => {
   }
 });
 
-// END TRIP (UPDATE SESUAI KOLOM TABEL PUBLIC.TRIPS)
+// END TRIP
 app.post(['/trips/end', '/end-trip'], async (req, res) => {
   const { trip_id, end_gps, photo_base64, end_notes } = req.body;
 
@@ -302,16 +330,42 @@ app.post(['/trips/end', '/end-trip'], async (req, res) => {
     const trip = result.rows[0];
 
     try {
+      const detailsQuery = await pool.query(
+        `SELECT 
+          v.plate_number,
+          d1.name AS amt1_name,
+          d2.name AS amt2_name
+         FROM trips t
+         LEFT JOIN vehicles v ON v.vehicle_id = $1
+         LEFT JOIN drivers d1 ON d1.driver_id = $2
+         LEFT JOIN drivers d2 ON d2.driver_id = $3
+         LIMIT 1`,
+        [trip.vehicle_id, trip.amt1_id, trip.amt2_id]
+      );
+
+      const details = detailsQuery.rows[0] || {};
+      const amt1Name = details.amt1_name || 'Driver';
+      const plateNo = details.plate_number || '-';
+
       if (end_gps) {
         const mapUrl = `https://www.google.com/maps?q=${end_gps}`;
-        sendWhatsAppNotification(
+        const waMessage = 
 `🛑 *E-LOGBOOK BAP: SELESAI PERJALANAN*
 ----------------------------------------
+*AMT 1:* ${amt1Name}
+*AMT 2:* ${details.amt2_name || '-'}
+*Armada:* ${plateNo}
 *Tujuan:* ${trip.destination_name}
-*Lokasi Tiba:* ${mapUrl}`
-        );
+*Catatan Tiba:* ${end_notes || '-'}
+*Lokasi Tiba:* ${mapUrl}
+----------------------------------------
+_Status: Selesai (COMPLETED)_`;
+
+        sendWhatsAppNotification(waMessage);
       }
-    } catch (waErr) {}
+    } catch (waErr) {
+      console.log('Error susun WA end trip:', waErr.message);
+    }
 
     res.json({ success: true, data: trip, trip: trip });
   } catch (err) {
