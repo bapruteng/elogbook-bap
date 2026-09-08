@@ -10,7 +10,7 @@ app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
-// Database Connection (Supabase)
+// Database Connection (Supabase Transaction Pooler)
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: {
@@ -18,7 +18,7 @@ const pool = new Pool({
   }
 });
 
-// Helper Function: Send WhatsApp Message via Fonnte API
+// Helper Function: Send WhatsApp Notification via Fonnte
 function sendWhatsAppNotification(message) {
   const token = process.env.WA_API_TOKEN;
   const target = process.env.WA_TARGET_PHONE;
@@ -80,7 +80,7 @@ app.post('/api/login', async (req, res) => {
     });
   }
 
-  // Driver / AMT Login Check from Supabase Database
+  // Driver / AMT Login Check
   try {
     const result = await pool.query(
       'SELECT * FROM drivers WHERE username = $1 AND password = $2',
@@ -92,13 +92,19 @@ app.post('/api/login', async (req, res) => {
       return res.json({
         success: true,
         role: 'driver',
-        user: { id: driver.driver_id || driver.id, name: driver.name, username: driver.username }
+        user: { 
+          id: driver.driver_id, 
+          name: driver.name, 
+          username: driver.username,
+          license_id: driver.license_id,
+          status: driver.status 
+        }
       });
     } else {
       return res.status(401).json({ success: false, message: 'Username atau password salah' });
     }
   } catch (err) {
-    console.error('Login Database Error:', err.message);
+    console.error('Login Error:', err.message);
     return res.status(500).json({ success: false, message: 'Gagal terhubung ke database', error: err.message });
   }
 });
@@ -110,7 +116,7 @@ app.post('/api/login', async (req, res) => {
 // Get All Drivers
 app.get(['/api/drivers', '/api/master/drivers'], async (req, res) => {
   try {
-    const result = await pool.query('SELECT * FROM drivers ORDER BY name ASC');
+    const result = await pool.query('SELECT * FROM drivers ORDER BY driver_id ASC');
     res.json({ success: true, data: result.rows });
   } catch (err) {
     console.error('Get Drivers Error:', err.message);
@@ -120,16 +126,22 @@ app.get(['/api/drivers', '/api/master/drivers'], async (req, res) => {
 
 // Add New Driver
 app.post(['/api/drivers', '/api/master/drivers'], async (req, res) => {
-  const { name, username, password } = req.body;
+  const { name, username, password, license_id, pin_code, status } = req.body;
 
   if (!name || !username || !password) {
-    return res.status(400).json({ success: false, message: 'Data nama, username, dan password wajib diisi' });
+    return res.status(400).json({ success: false, message: 'Nama, username, dan password wajib diisi' });
   }
+
+  const finalLicenseId = license_id || '-';
+  const finalPinCode = pin_code || '1234';
+  const finalStatus = status || 'ACTIVE';
 
   try {
     const result = await pool.query(
-      'INSERT INTO drivers (name, username, password) VALUES ($1, $2, $3) RETURNING *',
-      [name, username, password]
+      `INSERT INTO drivers (name, license_id, pin_code, status, username, password) 
+       VALUES ($1, $2, $3, $4, $5, $6) 
+       RETURNING *`,
+      [name, finalLicenseId, finalPinCode, finalStatus, username, password]
     );
     res.json({ success: true, data: result.rows[0] });
   } catch (err) {
@@ -142,7 +154,7 @@ app.post(['/api/drivers', '/api/master/drivers'], async (req, res) => {
 app.delete(['/api/drivers/:id', '/api/master/drivers/:id'], async (req, res) => {
   const { id } = req.params;
   try {
-    await pool.query('DELETE FROM drivers WHERE driver_id = $1 OR id = $1', [id]);
+    await pool.query('DELETE FROM drivers WHERE driver_id = $1', [id]);
     res.json({ success: true, message: 'Driver berhasil dihapus' });
   } catch (err) {
     console.error('Delete Driver Error:', err.message);
@@ -185,11 +197,23 @@ app.post(['/api/trucks', '/api/master/trucks'], async (req, res) => {
   }
 });
 
+// Delete Truck
+app.delete(['/api/trucks/:id', '/api/master/trucks/:id'], async (req, res) => {
+  const { id } = req.params;
+  try {
+    await pool.query('DELETE FROM trucks WHERE truck_id = $1 OR id = $1', [id]);
+    res.json({ success: true, message: 'Armada berhasil dihapus' });
+  } catch (err) {
+    console.error('Delete Truck Error:', err.message);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
 // =================================================================
-// 4. TRIPS & LOGBOOK MANAGEMENT (START & END TRIP)
+// 4. TRIPS & LOGBOOK MANAGEMENT
 // =================================================================
 
-// Get All Trip Logs (For Admin Dashboard)
+// Get All Trip Logs
 app.get('/api/trips', async (req, res) => {
   try {
     const result = await pool.query('SELECT * FROM trips ORDER BY created_at DESC');
@@ -216,7 +240,7 @@ app.post('/api/trips/start', async (req, res) => {
     const trip = result.rows[0];
     const mapUrl = `https://www.google.com/maps?q=${latitude},${longitude}`;
 
-    // Format & Kirim Pesan WA
+    // Format WA Message
     const waMessage = 
 `🚀 *E-LOGBOOK BAP: MULAI PERJALANAN*
 ----------------------------------------
@@ -258,7 +282,7 @@ app.post('/api/trips/end', async (req, res) => {
     const trip = result.rows[0];
     const mapUrl = `https://www.google.com/maps?q=${latitude},${longitude}`;
 
-    // Format & Kirim Pesan WA
+    // Format WA Message
     const waMessage = 
 `🛑 *E-LOGBOOK BAP: SELESAI PERJALANAN*
 ----------------------------------------
@@ -284,5 +308,4 @@ app.get('/api', (req, res) => {
   res.json({ success: true, message: 'E-Logbook BAP API is running smoothly' });
 });
 
-// Export App for Vercel Serverless
 module.exports = app;
